@@ -1,8 +1,3 @@
-```text
-labs/01-network-foundation/session.log
-```
-
-```text
 ============================================================
 Azure Networking Lab — Session Day 1 and 2 Log
 ============================================================
@@ -15,6 +10,7 @@ Branch:
 
 Location:
     centralindia
+
 
 ============================================================
 SESSION 1 — Resource Group, VNet, Subnet, NSG
@@ -35,6 +31,7 @@ Observed tags:
     owner: tarun
     CreatedOn: <Azure-generated timestamp>
 
+
 ------------------------------------------------------------
 Resource Group inspection
 ------------------------------------------------------------
@@ -43,8 +40,8 @@ Command:
 az group show -n az-net-lab-rg -o table
 
 Result:
-    Location      Name
-    centralindia  az-net-lab-rg
+    Location       Name
+    centralindia   az-net-lab-rg
 
 Note:
     Default table output does not display tags.
@@ -77,12 +74,13 @@ az group show -n az-net-lab-rg \
     -o table
 
 Result:
-    Name           Location      Owner    Autodelete
-    az-net-lab-rg  centralindia  tarun    Yes
+    Name           Location       Owner    Autodelete
+    az-net-lab-rg  centralindia   tarun    Yes
 
 Learning:
     JMESPath object keys on the left side are user-defined aliases.
     The value on the right side references the Azure JSON property.
+
 
 ------------------------------------------------------------
 Created VNet
@@ -102,6 +100,7 @@ Result:
     name: az-net-lab-vnet
     address space: 10.0.0.0/16
     location: centralindia
+
 
 ------------------------------------------------------------
 Created Subnet
@@ -136,6 +135,7 @@ az network vnet subnet create \
 Result:
     provisioningState: Succeeded
 
+
 ------------------------------------------------------------
 Subnet inspection
 ------------------------------------------------------------
@@ -162,6 +162,7 @@ Result:
         }
       ]
     }
+
 
 ------------------------------------------------------------
 NSG creation
@@ -193,13 +194,14 @@ Important:
     securityRules is empty initially.
     defaultSecurityRules contains Azure's built-in rules.
 
+
 ------------------------------------------------------------
 Custom NSG rule
 ------------------------------------------------------------
 
 Created:
 
-Allow-HTTPS-In
+    Allow-HTTPS-In
 
 Priority:
     100
@@ -226,6 +228,7 @@ az network nsg rule list \
     --nsg-name az-net-lab-nsg \
     -o table
 
+
 ------------------------------------------------------------
 NSG association
 ------------------------------------------------------------
@@ -244,27 +247,26 @@ az network vnet subnet update \
 Result:
     NSG association succeeded.
 
+
 ------------------------------------------------------------
 Important CLI observations
 ------------------------------------------------------------
 
 Incorrect:
-
-az network vnet create subnet ...
+    az network vnet create subnet ...
 
 Correct:
-
-az network vnet subnet create ...
+    az network vnet subnet create ...
 
 Incorrect:
-
-az network subnet show ...
+    az network subnet show ...
 
 Correct:
+    az network vnet subnet show ...
 
-az network vnet subnet show ...
+Learning:
+    The Azure CLI command hierarchy matters.
 
-The Azure CLI command hierarchy matters.
 
 ============================================================
 SESSION 2 — Rebuild and NSG-to-NSG Traffic Lab
@@ -278,6 +280,7 @@ Recreated:
     az-net-lab-rg
     az-net-lab-vnet
     az-net-lab-subnet
+
 
 ------------------------------------------------------------
 VNet / subnet structure
@@ -306,8 +309,9 @@ Result:
 
 Final subnet layout:
 
-    az-net-lab-subnet   -> 10.0.1.0/24
-    az-net-lab-subnet2  -> 10.0.2.0/24
+    az-net-lab-subnet    -> 10.0.1.0/24
+    az-net-lab-subnet2   -> 10.0.2.0/24
+
 
 ------------------------------------------------------------
 Created two NSGs
@@ -333,21 +337,23 @@ Outbound:
     AllowInternetOutBound          65001
     DenyAllOutBound                65500
 
+
 ------------------------------------------------------------
 NSG associations
 ------------------------------------------------------------
 
 Subnet 1:
     az-net-lab-subnet
-    ->
+        ->
     az-net-lab-nsg1
 
 Subnet 2:
     az-net-lab-subnet2
-    ->
+        ->
     az-net-lab-nsg2
 
 Verified that both subnets had the expected NSG associations.
+
 
 ------------------------------------------------------------
 Created NSG rule on NSG 2
@@ -383,6 +389,7 @@ Purpose:
     Allow TCP/8080 traffic originating from subnet 1
     to subnet 2.
 
+
 ------------------------------------------------------------
 Updated destination port
 ------------------------------------------------------------
@@ -399,6 +406,7 @@ The rule name remained:
 Observation:
     Updating a rule does not rename the rule.
 
+
 ------------------------------------------------------------
 Rule rename experiment
 ------------------------------------------------------------
@@ -413,12 +421,10 @@ Solution:
     Delete the old rule and create a new rule.
 
 Deleted:
-
-Allow-Subnet2-8080
+    Allow-Subnet2-8080
 
 Created:
-
-Allow-Subnet2-443
+    Allow-Subnet2-443
 
 Configuration:
 
@@ -443,13 +449,14 @@ Destination:
 Destination port:
     443
 
+
 ------------------------------------------------------------
 NSG 1 deny rule
 ------------------------------------------------------------
 
 Created:
 
-Deny-Subnet1-to-Subnet2-443
+    Deny-Subnet1-to-Subnet2-443
 
 Priority:
     100
@@ -475,26 +482,27 @@ Destination port:
 Purpose:
     Demonstrate NSG rule priority and rule evaluation.
 
+
 ------------------------------------------------------------
 NSG 1 allow rule
 ------------------------------------------------------------
 
 Initial attempt contained a typo:
 
---source-address-prefoxes
+    --source-address-prefoxes
 
 Result:
     Azure CLI rejected the argument.
 
 Corrected:
 
---source-address-prefixes
+    --source-address-prefixes
 
 Created:
 
-Allow-Subnet1-to-Subnet2-443
+    Allow-Subnet1-to-Subnet2-443
 
-Priority:
+Initial priority:
     200
 
 Direction:
@@ -515,6 +523,7 @@ Destination:
 Destination port:
     443
 
+
 ------------------------------------------------------------
 Priority experiment
 ------------------------------------------------------------
@@ -524,7 +533,8 @@ Initial state:
     Deny-Subnet1-to-Subnet2-443    Priority 100
     Allow-Subnet1-to-Subnet2-443   Priority 200
 
-Attempted to change priority to 50.
+Attempted to change priority to:
+    50
 
 Result:
     Failed.
@@ -538,15 +548,20 @@ Allowed range:
 Learning:
     NSG custom rule priorities must be between 100 and 4096.
 
+
 ------------------------------------------------------------
 Priority conflict experiment
 ------------------------------------------------------------
 
 Attempted to change:
 
-Deny-Subnet1-to-Subnet2-443
+    Deny-Subnet1-to-Subnet2-443
 
-from priority 100 to priority 200.
+from priority:
+    100
+
+to:
+    200
 
 Result:
     Failed.
@@ -561,19 +576,20 @@ Learning:
     NSG rules cannot have the same priority when they have the
     same direction.
 
+
 ------------------------------------------------------------
 Successfully reordered rules
 ------------------------------------------------------------
 
 Changed:
 
-Deny-Subnet1-to-Subnet2-443
-    100 -> 300
+    Deny-Subnet1-to-Subnet2-443
+        100 -> 300
 
 Then changed:
 
-Allow-Subnet1-to-Subnet2-443
-    200 -> 100
+    Allow-Subnet1-to-Subnet2-443
+        200 -> 100
 
 Final state:
 
@@ -590,6 +606,7 @@ Final state:
 Important learning:
 
     NSG rules are evaluated in priority order.
+
     Lower numerical priority is evaluated before higher numerical
     priority.
 
@@ -601,6 +618,426 @@ Therefore:
 
 The allow rule wins for traffic matching that rule.
 
+
+============================================================
+SESSION 2 — VM CREATION AND TRAFFIC TESTING
+============================================================
+
+
+------------------------------------------------------------
+VM SKU availability investigation
+------------------------------------------------------------
+
+The lab is running under an Azure trial subscription.
+
+Initial target VM size:
+    Standard_B1s
+
+Attempted:
+
+az vm create \
+    -g az-net-lab-rg \
+    -n az-net-lab-vm-test \
+    --image Ubuntu2204 \
+    --size Standard_B1s \
+    --vnet-name az-net-lab-vnet \
+    --subnet az-net-lab-subnet \
+    --admin-username azureuser \
+    --generate-ssh-keys \
+    --validate
+
+Result:
+    Failed.
+
+Error:
+    SkuNotAvailable
+
+Reason:
+    Standard_B1s was not currently available in Central India
+    because of capacity restrictions.
+
+Important:
+    The failure was not caused by the VNet, subnet, or command
+    syntax.
+
+Alternative VM size selected:
+    Standard_D2as_v5
+
+
+------------------------------------------------------------
+VM1 creation
+------------------------------------------------------------
+
+Created:
+
+    az-net-lab-vm1
+
+Command:
+
+az vm create \
+    -g az-net-lab-rg \
+    -n az-net-lab-vm1 \
+    --image Ubuntu2204 \
+    --size Standard_D2as_v5 \
+    --vnet-name az-net-lab-vnet \
+    --subnet az-net-lab-subnet \
+    --admin-username azureuser \
+    --generate-ssh-keys
+
+Result:
+
+    VM:
+        az-net-lab-vm1
+
+    Power state:
+        VM running
+
+    Private IP:
+        10.0.1.4
+
+    Public IP:
+        20.219.12.120
+
+    Size:
+        Standard_D2as_v5
+
+The VM creation command automatically created:
+
+    az-net-lab-vm1VMNic
+    az-net-lab-vm1PublicIP
+    az-net-lab-vm1NSG
+
+
+------------------------------------------------------------
+VM2 creation
+------------------------------------------------------------
+
+Created:
+
+    az-net-lab-vm2
+
+Command:
+
+az vm create \
+    -g az-net-lab-rg \
+    -n az-net-lab-vm2 \
+    --image Ubuntu2204 \
+    --size Standard_D2as_v5 \
+    --vnet-name az-net-lab-vnet \
+    --subnet az-net-lab-subnet2 \
+    --admin-username azureuser \
+    --generate-ssh-keys
+
+Result:
+
+    VM:
+        az-net-lab-vm2
+
+    Power state:
+        VM running
+
+    Private IP:
+        10.0.2.4
+
+    Public IP:
+        20.197.57.119
+
+    Size:
+        Standard_D2as_v5
+
+The VM creation command automatically created:
+
+    az-net-lab-vm2VMNic
+    az-net-lab-vm2PublicIP
+    az-net-lab-vm2NSG
+
+
+------------------------------------------------------------
+VM network inspection
+------------------------------------------------------------
+
+Command:
+
+az network nic list -g az-net-lab-rg \
+    --query "[].{NIC:name,PrivateIP:ipConfigurations[0].privateIPAddress,Subnet:ipConfigurations[0].subnet.id,NSG:networkSecurityGroup.id}" \
+    -o table
+
+Observed:
+
+    az-net-lab-vm1VMNic
+        Private IP: 10.0.1.4
+        Subnet: az-net-lab-subnet
+        NSG: az-net-lab-vm1NSG
+
+    az-net-lab-vm2VMNic
+        Private IP: 10.0.2.4
+        Subnet: az-net-lab-subnet2
+        NSG: az-net-lab-vm2NSG
+
+
+------------------------------------------------------------
+VM-created NSGs
+------------------------------------------------------------
+
+Both VM-created NSGs initially contained:
+
+    default-allow-ssh
+        Priority: 1000
+        Direction: Inbound
+        Access: Allow
+        Protocol: TCP
+        Destination port: 22
+
+
+------------------------------------------------------------
+SSH observation on Windows
+------------------------------------------------------------
+
+Attempted:
+
+az vm ssh ...
+
+Result:
+    'ssh' is misspelled or not recognized by the system.
+
+Observation:
+    The Azure CLI environment on Windows did not support the
+    attempted "az vm ssh" command.
+
+A direct SSH attempt was made:
+
+ssh azureuser@20.197.57.119
+
+Result:
+    Connection timed out.
+
+This was not used as the primary connectivity test because the
+lab focuses on private VNet traffic and NSG behavior.
+
+
+------------------------------------------------------------
+Removing VM NIC-level NSGs
+------------------------------------------------------------
+
+The automatically created VM NSGs were removed from the NICs:
+
+az network nic update \
+    -g az-net-lab-rg \
+    -n az-net-lab-vm1VMNic \
+    --remove networkSecurityGroup
+
+az network nic update \
+    -g az-net-lab-rg \
+    -n az-net-lab-vm2VMNic \
+    --remove networkSecurityGroup
+
+Result:
+
+    VM1 NIC:
+        No NIC-level NSG
+
+    VM2 NIC:
+        No NIC-level NSG
+
+Reason:
+    The lab uses subnet-level NSGs for controlled traffic
+    evaluation.
+
+
+------------------------------------------------------------
+VM2 service setup
+------------------------------------------------------------
+
+Verified Python:
+
+    Python 3.10.12
+
+Verified netcat:
+
+    /usr/bin/nc
+
+Started a TCP listener on port 443:
+
+    nohup nc -lk 443 >/tmp/nc443.log 2>&1 &
+
+Verified listener:
+
+    LISTEN 0  1  0.0.0.0:443  0.0.0.0:*  users:(("nc",pid=1822,fd=3))
+
+
+------------------------------------------------------------
+Initial VM-to-VM connectivity test
+------------------------------------------------------------
+
+From VM1:
+
+    timeout 5 nc -vz 10.0.2.4 443
+
+Result:
+
+    Connection to 10.0.2.4 443 port [tcp/https] succeeded!
+
+This demonstrated successful TCP connectivity from:
+
+    10.0.1.4
+        ->
+    10.0.2.4:443
+
+
+------------------------------------------------------------
+Reverse connectivity test
+------------------------------------------------------------
+
+Started a TCP listener on VM1:
+
+    nohup nc -lk 443 >/tmp/nc443.log 2>&1 &
+
+Verified:
+
+    LISTEN 0  1  0.0.0.0:443  0.0.0.0:*  users:(("nc",pid=1848,fd=3))
+
+From VM2:
+
+    timeout 5 nc -vz 10.0.1.4 443
+
+Result:
+
+    Connection to 10.0.1.4 443 port [tcp/https] succeeded!
+
+This demonstrated successful TCP connectivity from:
+
+    10.0.2.4
+        ->
+    10.0.1.4:443
+
+
+============================================================
+NSG-BASED DIRECTIONAL TRAFFIC TEST
+============================================================
+
+
+------------------------------------------------------------
+Re-associated NSG1 with VM1 NIC
+------------------------------------------------------------
+
+Command:
+
+az network nic update \
+    -g az-net-lab-rg \
+    -n az-net-lab-vm1VMNic \
+    --network-security-group az-net-lab-nsg1
+
+Result:
+    NSG1 successfully associated with VM1 NIC.
+
+Observed:
+
+    VM1 NIC:
+        NSG = az-net-lab-nsg1
+
+    VM2 NIC:
+        No NIC-level NSG
+
+
+------------------------------------------------------------
+Inbound deny rule on NSG1
+------------------------------------------------------------
+
+Created:
+
+    Deny-Subnet2-to-Subnet1-443
+
+Priority:
+    100
+
+Direction:
+    Inbound
+
+Access:
+    Deny
+
+Protocol:
+    TCP
+
+Source:
+    10.0.2.0/24
+
+Destination:
+    10.0.1.0/24
+
+Destination port:
+    443
+
+Purpose:
+    Block TCP/443 traffic originating from subnet 2
+    and entering subnet 1.
+
+
+------------------------------------------------------------
+NSG1 final rule state
+------------------------------------------------------------
+
+    Allow-Subnet1-to-Subnet2-443
+        Priority: 100
+        Direction: Outbound
+        Access: Allow
+        Source: 10.0.1.0/24
+        Destination: 10.0.2.0/24
+        Port: 443
+
+    Deny-Subnet2-to-Subnet1-443
+        Priority: 100
+        Direction: Inbound
+        Access: Deny
+        Source: 10.0.2.0/24
+        Destination: 10.0.1.0/24
+        Port: 443
+
+Important:
+    Both rules use priority 100, but they are in different
+    directions. This is valid because priority uniqueness is
+    enforced within the relevant direction.
+
+
+------------------------------------------------------------
+Directional connectivity test — blocked direction
+------------------------------------------------------------
+
+From VM2:
+
+    timeout 5 nc -vz 10.0.1.4 443
+
+Result:
+
+    No successful connection message.
+
+Interpretation:
+
+    VM2 -> VM1 TCP/443 was blocked.
+
+The inbound deny rule on VM1's NSG matched the traffic.
+
+
+------------------------------------------------------------
+Directional connectivity test — allowed direction
+------------------------------------------------------------
+
+From VM1:
+
+    timeout 5 nc -vz 10.0.2.4 443
+
+Result:
+
+    Connection to 10.0.2.4 443 port [tcp/https] succeeded!
+
+Interpretation:
+
+    VM1 -> VM2 TCP/443 remained allowed.
+
+This demonstrates that NSG rules can enforce directional
+communication between subnets.
+
+
 ============================================================
 FINAL NETWORK DESIGN AT END OF SESSION
 ============================================================
@@ -608,44 +1045,119 @@ FINAL NETWORK DESIGN AT END OF SESSION
 Resource Group:
     az-net-lab-rg
 
+Location:
+    centralindia
+
 VNet:
     az-net-lab-vnet
     10.0.0.0/16
 
+
+------------------------------------------------------------
+Subnets
+------------------------------------------------------------
+
 Subnet 1:
     az-net-lab-subnet
     10.0.1.0/24
-    NSG: az-net-lab-nsg1
+
+    VM:
+        az-net-lab-vm1
+        Private IP: 10.0.1.4
+
+    NSG:
+        az-net-lab-nsg1
+
 
 Subnet 2:
     az-net-lab-subnet2
     10.0.2.0/24
-    NSG: az-net-lab-nsg2
 
-NSG 1 custom rules:
+    VM:
+        az-net-lab-vm2
+        Private IP: 10.0.2.4
 
-    Priority 100
+    NSG:
+        az-net-lab-nsg2
+        No NIC-level NSG
+
+
+------------------------------------------------------------
+NSG1 custom rules
+------------------------------------------------------------
+
+Priority 100:
+
     Allow-Subnet1-to-Subnet2-443
-    Outbound
-    TCP/443
-    10.0.1.0/24 -> 10.0.2.0/24
-    Allow
 
-    Priority 300
-    Deny-Subnet1-to-Subnet2-443
-    Outbound
-    TCP/443
-    10.0.1.0/24 -> 10.0.2.0/24
-    Deny
+    Direction:
+        Outbound
 
-NSG 2 custom rule:
+    Access:
+        Allow
 
-    Priority 100
+    Protocol:
+        TCP
+
+    Source:
+        10.0.1.0/24
+
+    Destination:
+        10.0.2.0/24
+
+    Port:
+        443
+
+
+Priority 100:
+
+    Deny-Subnet2-to-Subnet1-443
+
+    Direction:
+        Inbound
+
+    Access:
+        Deny
+
+    Protocol:
+        TCP
+
+    Source:
+        10.0.2.0/24
+
+    Destination:
+        10.0.1.0/24
+
+    Port:
+        443
+
+
+------------------------------------------------------------
+NSG2 custom rule
+------------------------------------------------------------
+
+Priority 100:
+
     Allow-Subnet2-443
-    Inbound
-    TCP/443
-    10.0.1.0/24 -> 10.0.2.0/24
-    Allow
+
+    Direction:
+        Inbound
+
+    Access:
+        Allow
+
+    Protocol:
+        TCP
+
+    Source:
+        10.0.1.0/24
+
+    Destination:
+        10.0.2.0/24
+
+    Port:
+        443
+
 
 ============================================================
 KEY LEARNINGS
@@ -653,9 +1165,10 @@ KEY LEARNINGS
 
 1. A subnet must be contained within the VNet address space.
 
-2. NSGs can be associated with subnets.
+2. NSGs can be associated with subnets or NICs.
 
-3. NSGs contain both default security rules and custom security rules.
+3. NSGs contain both default security rules and custom security
+   rules.
 
 4. Default rules exist even when securityRules is empty.
 
@@ -670,10 +1183,12 @@ KEY LEARNINGS
 
 8. Lower priority numbers are evaluated first.
 
-9. Two rules cannot use the same priority in the same direction.
+9. Two rules cannot use the same priority when they conflict
+   within the same direction.
 
-10. An NSG rule cannot simply be renamed through the update operation;
-    deleting and recreating the rule is the practical approach.
+10. An NSG rule cannot simply be renamed through the update
+    operation; deleting and recreating the rule is the practical
+    approach.
 
 11. JMESPath aliases are user-defined:
 
@@ -691,7 +1206,45 @@ KEY LEARNINGS
 14. Resource IDs, subscription IDs, resource GUIDs, and ETags should
     not be copied into public lab documentation unnecessarily.
 
+15. Azure VM creation can automatically create supporting resources,
+    including NICs, public IPs, and NSGs.
+
+16. VM SKU availability can depend on regional capacity and Azure
+    subscription constraints.
+
+17. Standard_B1s was unavailable in Central India due to capacity
+    restrictions during this lab.
+
+18. Standard_D2as_v5 successfully worked for both lab VMs.
+
+19. Private IP connectivity between VMs can be tested using netcat
+    without requiring interactive SSH access.
+
+20. Azure Run Command can be used to execute commands inside a VM
+    when SSH access is unavailable.
+
+21. NSG rules can enforce directional traffic behavior.
+
+22. A connection can succeed in one direction while being blocked
+    in the reverse direction.
+
+23. For VM2 -> VM1 traffic:
+       NSG1 inbound deny blocked TCP/443.
+
+24. For VM1 -> VM2 traffic:
+       NSG1 outbound allow and NSG2 inbound allow permitted TCP/443.
+
+25. An NSG priority value can be reused across different directions
+    because inbound and outbound rule evaluation are separate.
+
+26. A higher-priority deny rule can be bypassed only if another
+    applicable rule with a lower numerical priority matches first.
+
+27. NSGs are stateful. Traffic evaluation must consider the direction
+    and the established flow rather than treating every packet as
+    an independent new connection.
+
+
 ============================================================
 END OF SESSION LOG
 ============================================================
-```
