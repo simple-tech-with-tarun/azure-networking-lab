@@ -1,0 +1,697 @@
+```text
+labs/01-network-foundation/session.log
+```
+
+```text
+============================================================
+Azure Networking Lab — Session Day 1 and 2 Log
+============================================================
+
+Repository:
+    azure-networking-lab
+
+Branch:
+    feat/az-network-foundation
+
+Location:
+    centralindia
+
+============================================================
+SESSION 1 — Resource Group, VNet, Subnet, NSG
+============================================================
+
+Created Resource Group:
+
+Command:
+az group create --name az-net-lab-rg --location centralindia --tags owner=tarun
+
+Result:
+    provisioningState: Succeeded
+    name: az-net-lab-rg
+    location: centralindia
+
+Observed tags:
+    AutoDelete: Yes
+    owner: tarun
+    CreatedOn: <Azure-generated timestamp>
+
+------------------------------------------------------------
+Resource Group inspection
+------------------------------------------------------------
+
+Command:
+az group show -n az-net-lab-rg -o table
+
+Result:
+    Location      Name
+    centralindia  az-net-lab-rg
+
+Note:
+    Default table output does not display tags.
+
+Attempted JMESPath query:
+
+az group show -n az-net-lab-rg \
+    --query "{Name:name, Location:location, Tags;tags}" \
+    -o table
+
+Result:
+    Invalid JMESPath expression.
+
+Cause:
+    Used ';' instead of ':' in the object projection.
+
+Correct query:
+
+az group show -n az-net-lab-rg \
+    --query "{Name:name, Location:location, Tags:tags}" \
+    -o json
+
+Result:
+    Tags were displayed correctly.
+
+More focused query:
+
+az group show -n az-net-lab-rg \
+    --query "{Name:name, Location:location, Owner:tags.owner, Autodelete:tags.AutoDelete}" \
+    -o table
+
+Result:
+    Name           Location      Owner    Autodelete
+    az-net-lab-rg  centralindia  tarun    Yes
+
+Learning:
+    JMESPath object keys on the left side are user-defined aliases.
+    The value on the right side references the Azure JSON property.
+
+------------------------------------------------------------
+Created VNet
+------------------------------------------------------------
+
+Command:
+
+az network vnet create \
+    --resource-group az-net-lab-rg \
+    -n az-net-lab-vnet \
+    --address-prefix 10.0.0.0/16 \
+    --location centralindia \
+    --tags owner=tarun
+
+Result:
+    provisioningState: Succeeded
+    name: az-net-lab-vnet
+    address space: 10.0.0.0/16
+    location: centralindia
+
+------------------------------------------------------------
+Created Subnet
+------------------------------------------------------------
+
+Initial attempt:
+
+az network vnet subnet create \
+    --resource-group az-net-lab-rg \
+    --vnet-name az-net-lab-vnet \
+    -n az-net-lab-subnet \
+    --address-prefixes 10.1.0.0/24
+
+Result:
+    Failed.
+
+Error:
+    Subnet range is outside the VNet address range.
+
+Reason:
+    VNet address space is 10.0.0.0/16.
+    10.1.0.0/24 is outside that address space.
+
+Corrected command:
+
+az network vnet subnet create \
+    --resource-group az-net-lab-rg \
+    --vnet-name az-net-lab-vnet \
+    -n az-net-lab-subnet \
+    --address-prefixes 10.0.1.0/24
+
+Result:
+    provisioningState: Succeeded
+
+------------------------------------------------------------
+Subnet inspection
+------------------------------------------------------------
+
+Command:
+
+az network vnet show \
+    --resource-group az-net-lab-rg \
+    --name az-net-lab-vnet \
+    --query "{Name:name, AddressSpace:addressSpace.addressPrefixes, Subnets:subnets[].{Name:name, Prefix:addressPrefix}}" \
+    -o json
+
+Result:
+
+    {
+      "AddressSpace": [
+        "10.0.0.0/16"
+      ],
+      "Name": "az-net-lab-vnet",
+      "Subnets": [
+        {
+          "Name": "az-net-lab-subnet",
+          "Prefix": "10.0.1.0/24"
+        }
+      ]
+    }
+
+------------------------------------------------------------
+NSG creation
+------------------------------------------------------------
+
+Created NSG:
+
+az network nsg create \
+    --resource-group az-net-lab-rg \
+    --name az-net-lab-nsg \
+    --location centralindia
+
+Result:
+    provisioningState: Succeeded
+
+Observed default security rules.
+
+Inbound defaults:
+    AllowVnetInBound               65000   Allow
+    AllowAzureLoadBalancerInBound  65001   Allow
+    DenyAllInBound                 65500   Deny
+
+Outbound defaults:
+    AllowVnetOutBound              65000   Allow
+    AllowInternetOutBound          65001   Allow
+    DenyAllOutBound                65500   Deny
+
+Important:
+    securityRules is empty initially.
+    defaultSecurityRules contains Azure's built-in rules.
+
+------------------------------------------------------------
+Custom NSG rule
+------------------------------------------------------------
+
+Created:
+
+Allow-HTTPS-In
+
+Priority:
+    100
+
+Direction:
+    Inbound
+
+Access:
+    Allow
+
+Protocol:
+    TCP
+
+Source:
+    Internet
+
+Destination port:
+    443
+
+Verified with:
+
+az network nsg rule list \
+    --resource-group az-net-lab-rg \
+    --nsg-name az-net-lab-nsg \
+    -o table
+
+------------------------------------------------------------
+NSG association
+------------------------------------------------------------
+
+Initially:
+    subnet had no NSG association.
+
+Associated NSG with subnet:
+
+az network vnet subnet update \
+    -g az-net-lab-rg \
+    --vnet-name az-net-lab-vnet \
+    -n az-net-lab-subnet \
+    --network-security-group az-net-lab-nsg
+
+Result:
+    NSG association succeeded.
+
+------------------------------------------------------------
+Important CLI observations
+------------------------------------------------------------
+
+Incorrect:
+
+az network vnet create subnet ...
+
+Correct:
+
+az network vnet subnet create ...
+
+Incorrect:
+
+az network subnet show ...
+
+Correct:
+
+az network vnet subnet show ...
+
+The Azure CLI command hierarchy matters.
+
+============================================================
+SESSION 2 — Rebuild and NSG-to-NSG Traffic Lab
+============================================================
+
+Note:
+    The Resource Group was automatically deleted because of an
+    AutoDelete rule associated with the Azure environment.
+
+Recreated:
+    az-net-lab-rg
+    az-net-lab-vnet
+    az-net-lab-subnet
+
+------------------------------------------------------------
+VNet / subnet structure
+------------------------------------------------------------
+
+VNet:
+    az-net-lab-vnet
+
+VNet address space:
+    10.0.0.0/16
+
+Subnet 1:
+    az-net-lab-subnet
+    10.0.1.0/24
+
+Created second subnet:
+
+az network vnet subnet create \
+    -g az-net-lab-rg \
+    --vnet az-net-lab-vnet \
+    -n az-net-lab-subnet2 \
+    --address-prefixes 10.0.2.0/24
+
+Result:
+    provisioningState: Succeeded
+
+Final subnet layout:
+
+    az-net-lab-subnet   -> 10.0.1.0/24
+    az-net-lab-subnet2  -> 10.0.2.0/24
+
+------------------------------------------------------------
+Created two NSGs
+------------------------------------------------------------
+
+NSG 1:
+    az-net-lab-nsg1
+
+NSG 2:
+    az-net-lab-nsg2
+
+Inspected default rules.
+
+Each NSG initially had:
+
+Inbound:
+    AllowVnetInBound               65000
+    AllowAzureLoadBalancerInBound  65001
+    DenyAllInBound                 65500
+
+Outbound:
+    AllowVnetOutBound              65000
+    AllowInternetOutBound          65001
+    DenyAllOutBound                65500
+
+------------------------------------------------------------
+NSG associations
+------------------------------------------------------------
+
+Subnet 1:
+    az-net-lab-subnet
+    ->
+    az-net-lab-nsg1
+
+Subnet 2:
+    az-net-lab-subnet2
+    ->
+    az-net-lab-nsg2
+
+Verified that both subnets had the expected NSG associations.
+
+------------------------------------------------------------
+Created NSG rule on NSG 2
+------------------------------------------------------------
+
+Initial rule:
+
+Name:
+    Allow-Subnet2-8080
+
+Priority:
+    100
+
+Direction:
+    Inbound
+
+Access:
+    Allow
+
+Protocol:
+    TCP
+
+Source:
+    10.0.1.0/24
+
+Destination:
+    10.0.2.0/24
+
+Destination port:
+    8080
+
+Purpose:
+    Allow TCP/8080 traffic originating from subnet 1
+    to subnet 2.
+
+------------------------------------------------------------
+Updated destination port
+------------------------------------------------------------
+
+Changed destination port from:
+    8080
+
+to:
+    443
+
+The rule name remained:
+    Allow-Subnet2-8080
+
+Observation:
+    Updating a rule does not rename the rule.
+
+------------------------------------------------------------
+Rule rename experiment
+------------------------------------------------------------
+
+Question:
+    Can an NSG rule be renamed directly?
+
+Conclusion:
+    No direct rename operation was used/available.
+
+Solution:
+    Delete the old rule and create a new rule.
+
+Deleted:
+
+Allow-Subnet2-8080
+
+Created:
+
+Allow-Subnet2-443
+
+Configuration:
+
+Priority:
+    100
+
+Direction:
+    Inbound
+
+Access:
+    Allow
+
+Protocol:
+    TCP
+
+Source:
+    10.0.1.0/24
+
+Destination:
+    10.0.2.0/24
+
+Destination port:
+    443
+
+------------------------------------------------------------
+NSG 1 deny rule
+------------------------------------------------------------
+
+Created:
+
+Deny-Subnet1-to-Subnet2-443
+
+Priority:
+    100
+
+Direction:
+    Outbound
+
+Access:
+    Deny
+
+Protocol:
+    TCP
+
+Source:
+    10.0.1.0/24
+
+Destination:
+    10.0.2.0/24
+
+Destination port:
+    443
+
+Purpose:
+    Demonstrate NSG rule priority and rule evaluation.
+
+------------------------------------------------------------
+NSG 1 allow rule
+------------------------------------------------------------
+
+Initial attempt contained a typo:
+
+--source-address-prefoxes
+
+Result:
+    Azure CLI rejected the argument.
+
+Corrected:
+
+--source-address-prefixes
+
+Created:
+
+Allow-Subnet1-to-Subnet2-443
+
+Priority:
+    200
+
+Direction:
+    Outbound
+
+Access:
+    Allow
+
+Protocol:
+    TCP
+
+Source:
+    10.0.1.0/24
+
+Destination:
+    10.0.2.0/24
+
+Destination port:
+    443
+
+------------------------------------------------------------
+Priority experiment
+------------------------------------------------------------
+
+Initial state:
+
+    Deny-Subnet1-to-Subnet2-443    Priority 100
+    Allow-Subnet1-to-Subnet2-443   Priority 200
+
+Attempted to change priority to 50.
+
+Result:
+    Failed.
+
+Error:
+    SecurityRuleInvalidPriority
+
+Allowed range:
+    100-4096
+
+Learning:
+    NSG custom rule priorities must be between 100 and 4096.
+
+------------------------------------------------------------
+Priority conflict experiment
+------------------------------------------------------------
+
+Attempted to change:
+
+Deny-Subnet1-to-Subnet2-443
+
+from priority 100 to priority 200.
+
+Result:
+    Failed.
+
+Reason:
+    Priority 200 was already occupied by another outbound rule.
+
+Error:
+    SecurityRuleConflict
+
+Learning:
+    NSG rules cannot have the same priority when they have the
+    same direction.
+
+------------------------------------------------------------
+Successfully reordered rules
+------------------------------------------------------------
+
+Changed:
+
+Deny-Subnet1-to-Subnet2-443
+    100 -> 300
+
+Then changed:
+
+Allow-Subnet1-to-Subnet2-443
+    200 -> 100
+
+Final state:
+
+    Allow-Subnet1-to-Subnet2-443
+        Priority: 100
+        Direction: Outbound
+        Access: Allow
+
+    Deny-Subnet1-to-Subnet2-443
+        Priority: 300
+        Direction: Outbound
+        Access: Deny
+
+Important learning:
+
+    NSG rules are evaluated in priority order.
+    Lower numerical priority is evaluated before higher numerical
+    priority.
+
+Therefore:
+
+    Priority 100 Allow
+        is evaluated before
+    Priority 300 Deny
+
+The allow rule wins for traffic matching that rule.
+
+============================================================
+FINAL NETWORK DESIGN AT END OF SESSION
+============================================================
+
+Resource Group:
+    az-net-lab-rg
+
+VNet:
+    az-net-lab-vnet
+    10.0.0.0/16
+
+Subnet 1:
+    az-net-lab-subnet
+    10.0.1.0/24
+    NSG: az-net-lab-nsg1
+
+Subnet 2:
+    az-net-lab-subnet2
+    10.0.2.0/24
+    NSG: az-net-lab-nsg2
+
+NSG 1 custom rules:
+
+    Priority 100
+    Allow-Subnet1-to-Subnet2-443
+    Outbound
+    TCP/443
+    10.0.1.0/24 -> 10.0.2.0/24
+    Allow
+
+    Priority 300
+    Deny-Subnet1-to-Subnet2-443
+    Outbound
+    TCP/443
+    10.0.1.0/24 -> 10.0.2.0/24
+    Deny
+
+NSG 2 custom rule:
+
+    Priority 100
+    Allow-Subnet2-443
+    Inbound
+    TCP/443
+    10.0.1.0/24 -> 10.0.2.0/24
+    Allow
+
+============================================================
+KEY LEARNINGS
+============================================================
+
+1. A subnet must be contained within the VNet address space.
+
+2. NSGs can be associated with subnets.
+
+3. NSGs contain both default security rules and custom security rules.
+
+4. Default rules exist even when securityRules is empty.
+
+5. Custom rules are returned under:
+       securityRules
+
+6. Default rules are returned under:
+       defaultSecurityRules
+
+7. NSG custom priorities range from:
+       100-4096
+
+8. Lower priority numbers are evaluated first.
+
+9. Two rules cannot use the same priority in the same direction.
+
+10. An NSG rule cannot simply be renamed through the update operation;
+    deleting and recreating the rule is the practical approach.
+
+11. JMESPath aliases are user-defined:
+
+       --query "{Owner:tags.owner}"
+
+    Here:
+       Owner = user-defined output name
+       tags.owner = Azure property being queried
+
+12. Azure CLI command groups are hierarchical and must be correct.
+
+13. Table output does not necessarily display every property.
+    JSON is useful when inspecting complete resource details.
+
+14. Resource IDs, subscription IDs, resource GUIDs, and ETags should
+    not be copied into public lab documentation unnecessarily.
+
+============================================================
+END OF SESSION LOG
+============================================================
+```
