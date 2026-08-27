@@ -1,0 +1,390 @@
+# Lab 2 — Azure Routing & User-Defined Routes
+## Session Log
+
+### Objective
+
+Understand how Azure routing works between subnets and how a custom User-Defined Route (UDR) can redirect traffic through a VM acting as a virtual appliance.
+
+The original plan was to use three VMs across three subnets. Due to the Azure subscription's regional core quota, the lab was adapted to use two VMs, with VM2 serving as both the transit appliance and the destination.
+
+---
+
+## 1. Initial Lab Topology
+
+### Virtual Network
+
+- VNet: `az-routing-lab-vnet`
+- Address space: `10.0.0.0/16`
+
+### Subnets
+
+| Subnet | Address Range |
+|---|---|
+| Subnet1 | `10.0.1.0/24` |
+| Subnet2 | `10.0.2.0/24` |
+| Subnet3 | `10.0.3.0/24` |
+
+### VMs
+
+| VM | IP | Subnet |
+|---|---|---|
+| VM1 | `10.0.1.4` | Subnet1 |
+| VM2 | `10.0.2.4` | Subnet2 |
+
+A third VM was initially planned for Subnet3.
+
+---
+
+## 2. Azure Regional Core Quota Issue
+
+Attempting to create VM3 failed because the subscription had reached its regional CPU quota in Central India.
+
+Azure reported:
+
+- Current regional core limit: `4`
+- Current usage: `4`
+- Additional required: `2`
+- Minimum new limit required: `6`
+
+A quota increase was intentionally not requested.
+
+### Decision
+
+Continue the lab with two VMs.
+
+VM2 would be configured with a second NIC connected to Subnet3.
+
+---
+
+## 3. Understanding Default Azure Routing
+
+Before introducing a custom route, VM1's effective route table was inspected.
+
+The VNet-local route was:
+
+```text
+10.0.0.0/16 → VnetLocal
+```
+
+This demonstrated that Azure automatically provides connectivity between subnets within the VNet.
+
+Traffic from VM1 toward VM2 therefore used Azure's default VNet routing.
+
+---
+
+## 4. Testing Connectivity Before Custom Routing
+
+VM2 was restarted and checked to ensure that no custom UDR was interfering with the initial test.
+
+VM2 was reachable at:
+
+```text
+10.0.2.4
+```
+
+A connectivity test from VM1 toward port `8080` on VM2 returned:
+
+```text
+Connection refused
+```
+
+This was expected because nothing was listening on port `8080`.
+
+The important point was that the traffic was reaching VM2 rather than being blocked by routing.
+
+---
+
+## 5. Creating the Route Table
+
+Created:
+
+```text
+az-routing-lab-rt1
+```
+
+A test route was initially created:
+
+```text
+10.0.3.0/24
+Next Hop Type: None
+```
+
+The effective route table on VM1 showed:
+
+```text
+User  Active  10.0.3.0/24  None
+```
+
+This demonstrated that a UDR can intentionally override the normal routing behavior and effectively blackhole traffic by using `None` as the next hop.
+
+The test route was then removed.
+
+---
+
+## 6. Configuring VM2 as a Virtual Appliance
+
+VM2's primary NIC was configured with Azure IP forwarding:
+
+```text
+enableIPForwarding = true
+```
+
+Verified with:
+
+```text
+IPForwarding: true
+```
+
+Linux IP forwarding was also enabled inside VM2:
+
+```text
+sudo sysctl -w net.ipv4.ip_forward=1
+```
+
+Verified with:
+
+```text
+net.ipv4.ip_forward = 1
+```
+
+This established the two required layers:
+
+1. Azure NIC must permit IP forwarding.
+2. The Linux operating system must permit IP forwarding.
+
+---
+
+## 7. Adding a Second NIC to VM2
+
+Created:
+
+```text
+az-routing-lab-vm2-subnet3-nic
+```
+
+The NIC was attached to Subnet3 and configured with:
+
+```text
+IP forwarding: true
+Private IP: 10.0.3.4
+```
+
+VM2 was then configured with two NICs:
+
+```text
+eth0 → 10.0.2.4/24
+eth1 → 10.0.3.4/24
+```
+
+The VM's network configuration was verified:
+
+```text
+eth0  UP  10.0.2.4/24
+eth1  UP  10.0.3.4/24
+```
+
+The routing table inside VM2 showed both connected networks:
+
+```text
+10.0.2.0/24 → eth0
+10.0.3.0/24 → eth1
+```
+
+---
+
+## 8. Creating the Virtual Appliance UDR
+
+Created the route:
+
+```text
+Name: route-to-vm2
+Address Prefix: 10.0.3.0/24
+Next Hop Type: VirtualAppliance
+Next Hop IP: 10.0.2.4
+```
+
+The route was verified successfully.
+
+VM1's effective route table then showed:
+
+```text
+User  Active  10.0.3.0/24  VirtualAppliance  10.0.2.4
+```
+
+This confirmed that Azure was directing traffic for Subnet3 toward VM2 instead of simply using the default VNet-local route.
+
+---
+
+## 9. Verifying the Route From VM1
+
+From VM1:
+
+```text
+ip route get 10.0.3.4
+```
+
+returned:
+
+```text
+10.0.3.4 via 10.0.1.1 dev eth0 src 10.0.1.4
+```
+
+This initially required careful interpretation.
+
+The Linux guest route table does not directly represent the Azure UDR. Azure performs the next-hop decision before the packet reaches the VM's operating system.
+
+The Azure effective route table was therefore the authoritative verification for the UDR.
+
+---
+
+## 10. Final Connectivity Test
+
+From VM1:
+
+```text
+ping -c 4 10.0.3.4
+```
+
+Result:
+
+```text
+4 packets transmitted
+4 received
+0% packet loss
+```
+
+This successfully demonstrated connectivity from VM1 to the IP on VM2's second NIC.
+
+---
+
+## 11. Final Routing Model
+
+The final conceptual path was:
+
+```text
+VM1
+10.0.1.4
+    |
+    | Destination: 10.0.3.4
+    |
+    | Azure UDR:
+    | 10.0.3.0/24
+    | → VirtualAppliance
+    | → 10.0.2.4
+    v
+VM2 eth0
+10.0.2.4
+    |
+    | IP forwarding
+    v
+VM2 eth1
+10.0.3.4
+```
+
+VM2 therefore served two roles in this experiment:
+
+- **Transit / virtual appliance**
+- **Destination**
+
+The destination `10.0.3.4` was owned by VM2 itself, so this experiment demonstrated the UDR and multi-NIC routing path but did not demonstrate forwarding to a separate third host.
+
+---
+
+## 12. Network Namespace Experiment — Parked
+
+A Linux network namespace (`testns`) and veth pair were briefly explored as a way to simulate a third host without consuming another Azure VM.
+
+This experiment was not completed and is intentionally parked for a future Linux networking lab.
+
+It is not considered part of the completed objectives of Lab 2.
+
+---
+
+# Key Lessons
+
+### Azure default routing
+
+Azure automatically provides VNet-local routing:
+
+```text
+10.0.0.0/16 → VnetLocal
+```
+
+### UDR
+
+A UDR can override the default routing decision for a destination prefix.
+
+Example:
+
+```text
+10.0.3.0/24 → VirtualAppliance → 10.0.2.4
+```
+
+### Virtual Appliance
+
+A VM can be used as a routing appliance when:
+
+- Azure NIC IP forwarding is enabled.
+- The guest operating system has IP forwarding enabled.
+- The VM has appropriate network interfaces/routes.
+
+### Effective Route Table
+
+The effective route table is an important troubleshooting tool because it shows the routes Azure actually applies to a NIC.
+
+### Important distinction
+
+The UDR's next hop is the **IP of the appliance**, not the destination NIC.
+
+In this lab:
+
+```text
+Destination: 10.0.3.0/24
+Next hop:    10.0.2.4
+```
+
+Azure first sent traffic toward VM2. VM2 then provided the path toward its second interface.
+
+### Lab limitation
+
+Because the subscription's Central India regional core quota was limited to four cores, a third VM could not be created.
+
+Therefore, the final lab demonstrated:
+
+```text
+VM1 → VM2 (transit + destination)
+```
+
+rather than the more complete:
+
+```text
+VM1 → VM2 (transit) → VM3 (destination)
+```
+
+The latter remains a potential future experiment.
+
+---
+
+# Lab 2 Status
+
+**Completed**
+
+Core objectives achieved:
+
+- [x] Understand Azure default VNet routing
+- [x] Create and inspect a route table
+- [x] Create and remove a UDR
+- [x] Understand `NextHopType None`
+- [x] Configure a VM as a virtual appliance
+- [x] Enable Azure NIC IP forwarding
+- [x] Enable Linux IP forwarding
+- [x] Configure a multi-NIC VM
+- [x] Verify effective routes
+- [x] Successfully route traffic through VM2 toward Subnet3
+
+Deferred:
+
+- [ ] Demonstrate VM2 forwarding traffic to a separate destination host
+- [ ] Explore Linux network namespaces/veth pairs
+
+These deferred items are intentionally left for a future lab rather than considered incomplete work for Lab 2.
