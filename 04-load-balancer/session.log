@@ -1,0 +1,503 @@
+Absolutely. Here’s the session log content for the **Azure Load Balancer lab**, capturing what we actually built, tested, learned, and verified.
+
+# Session Log — Azure Load Balancer Lab
+
+## Session Objective
+
+Build and validate an Azure Standard Public Load Balancer using two Ubuntu VMs as backend servers.
+
+The lab was designed to understand:
+
+- Azure Load Balancer architecture
+- Frontend public IP
+- Backend address pools
+- Health probes
+- Load-balancing rules
+- NSG requirements
+- Backend health and failure detection
+- Traffic distribution
+- Backend recovery
+
+---
+
+## 1. Lab Resource Group
+
+Created the resource group:
+
+```text
+Resource Group: az-lb-lab-rg
+Location: centralindia
+Tags:
+  owner=tarun
+  AutoDelete=Yes
+```
+
+The previous NSG lab resource group was deleted before starting this lab.
+
+---
+
+## 2. Virtual Network
+
+Created:
+
+```text
+VNet: az-lb-lab-vnet
+Address Space: 10.10.0.0/16
+```
+
+Subnets:
+
+```text
+az-lb-lab-subnet1 → 10.10.1.0/24
+az-lb-lab-subnet2 → 10.10.2.0/24
+```
+
+The two backend VMs were intentionally placed in different subnets while remaining inside the same VNet.
+
+---
+
+## 3. Backend VMs
+
+Created two Ubuntu 22.04 VMs.
+
+### VM1
+
+```text
+Name: az-lb-lab-vm1
+Private IP: 10.10.1.4
+Subnet: az-lb-lab-subnet1
+```
+
+### VM2
+
+```text
+Name: az-lb-lab-vm2
+Private IP: 10.10.2.4
+Subnet: az-lb-lab-subnet2
+```
+
+NICs:
+
+```text
+az-lb-lab-vm1VMNic → 10.10.1.4
+az-lb-lab-vm2VMNic → 10.10.2.4
+```
+
+---
+
+## 4. Nginx Backend Services
+
+Installed Nginx on both VMs.
+
+Configured different responses so that traffic distribution could be observed:
+
+```text
+VM1 → Hello from VM1
+VM2 → Hello from VM2
+```
+
+Verified directly from inside the VNet:
+
+```text
+VM1 → VM2
+curl http://10.10.2.4
+→ Hello from VM2
+
+VM2 → VM1
+curl http://10.10.1.4
+→ Hello from VM1
+```
+
+This confirmed that both backend applications were reachable over HTTP.
+
+---
+
+## 5. NSG Configuration
+
+Both VM NICs had NSGs attached.
+
+Initially, each VM had:
+
+```text
+default-allow-ssh
+Priority: 1000
+Direction: Inbound
+Access: Allow
+Protocol: TCP
+Port: 22
+```
+
+Added HTTP access:
+
+```text
+allow-http
+Priority: 200
+Direction: Inbound
+Access: Allow
+Protocol: TCP
+Source: *
+Destination: *
+Port: 80
+```
+
+This was necessary because the Standard Load Balancer requires the backend to allow the relevant inbound traffic.
+
+---
+
+## 6. Public IP
+
+Created:
+
+```text
+Public IP: az-lb-lab-pip
+IP Address: 20.207.206.109
+SKU: Standard
+Allocation: Static
+Location: centralindia
+```
+
+This public IP became the frontend entry point for the Load Balancer.
+
+---
+
+## 7. Azure Load Balancer
+
+Created:
+
+```text
+Load Balancer: az-lb-lab-lb
+SKU: Standard
+Location: centralindia
+```
+
+Frontend:
+
+```text
+Frontend name: az-lb-lab-frontend
+Public IP: az-lb-lab-pip
+```
+
+Backend pool automatically created:
+
+```text
+az-lb-lab-lbbepool
+```
+
+Added:
+
+```text
+vm1 → 10.10.1.4
+vm2 → 10.10.2.4
+```
+
+Verified backend pool membership:
+
+```text
+Name    IP
+vm1     10.10.1.4
+vm2     10.10.2.4
+```
+
+---
+
+## 8. Health Probe
+
+Created an HTTP health probe:
+
+```text
+Name: az-lb-lab-http-probe
+Protocol: HTTP
+Port: 80
+Path: /
+Interval: 15 seconds
+```
+
+The probe was associated with the load-balancing rule.
+
+Important concept:
+
+The backend pool contains the VMs, but the health probe determines whether a backend is considered healthy and eligible to receive traffic.
+
+---
+
+## 9. Load-Balancing Rule
+
+Created:
+
+```text
+Rule: az-lb-lab-http-rule
+Protocol: TCP
+
+Frontend:
+  Port 80
+
+Backend:
+  Port 80
+
+Backend Pool:
+  az-lb-lab-lbbepool
+
+Probe:
+  az-lb-lab-http-probe
+```
+
+Architecture:
+
+```text
+Client
+  |
+  | TCP :80
+  v
+20.207.206.109
+  |
+  v
+Azure Load Balancer
+  |
+  +------ VM1 10.10.1.4 :80
+  |
+  +------ VM2 10.10.2.4 :80
+```
+
+---
+
+## 10. Initial Public Load Balancer Test
+
+Initial request to the public IP failed:
+
+```text
+curl.exe http://20.207.206.109
+```
+
+The connection timed out.
+
+Troubleshooting showed that Nginx was running on VM1:
+
+```text
+LISTEN 0 511 0.0.0.0:80
+```
+
+The VM NSGs, however, only allowed SSH at that point.
+
+Added the `allow-http` NSG rule to both VM NSGs.
+
+After that, the Load Balancer became reachable.
+
+---
+
+## 11. Traffic Distribution Test
+
+Executed:
+
+```powershell
+1..10 | ForEach-Object {
+    curl.exe -s http://20.207.206.109
+}
+```
+
+Observed:
+
+```text
+Hello from VM1
+Hello from VM2
+Hello from VM1
+Hello from VM2
+Hello from VM1
+Hello from VM2
+Hello from VM1
+Hello from VM2
+Hello from VM1
+Hello from VM2
+```
+
+This confirmed that the Load Balancer was distributing traffic across both backend VMs.
+
+Important observation:
+
+Azure Load Balancer should not be thought of as a simplistic round-robin mechanism. Its default load distribution is flow-based, using a hash of connection characteristics.
+
+---
+
+## 12. Backend Failure Experiment
+
+To demonstrate health-probe behavior, Nginx was deliberately stopped on VM1:
+
+```bash
+sudo systemctl stop nginx
+```
+
+VM1 was still present in the backend pool, but its HTTP service was no longer responding.
+
+Repeated requests to the public Load Balancer IP produced:
+
+```text
+Hello from VM2
+Hello from VM2
+Hello from VM2
+Hello from VM2
+Hello from VM2
+Hello from VM2
+Hello from VM2
+Hello from VM2
+Hello from VM2
+Hello from VM2
+```
+
+This demonstrated that the Load Balancer detected VM1 as unhealthy through the HTTP health probe and stopped sending new traffic to it.
+
+VM2 continued serving traffic normally.
+
+---
+
+## 13. Backend Recovery
+
+Started Nginx again on VM1:
+
+```bash
+sudo systemctl start nginx
+```
+
+Verified locally:
+
+```bash
+curl http://localhost
+```
+
+Result:
+
+```text
+Hello from VM1
+```
+
+This confirmed that the backend application had recovered.
+
+After the health probe detected the recovered service, VM1 became eligible to receive Load Balancer traffic again.
+
+---
+
+## 14. Important Concepts Learned
+
+### Backend pool membership ≠ backend health
+
+A VM can remain registered in the backend pool while being temporarily excluded from traffic because its health probe is failing.
+
+### Health probes control backend eligibility
+
+The health probe continuously checks:
+
+```text
+VM :80 /
+```
+
+If the probe fails, the backend is considered unhealthy.
+
+### NSGs still matter
+
+The Load Balancer does not bypass the VM's network security controls.
+
+The backend NSG must permit the required traffic.
+
+### Load Balancer and Nginx have different responsibilities
+
+```text
+Azure Load Balancer
+    ↓
+Receives client traffic
+    ↓
+Selects healthy backend
+    ↓
+VM
+    ↓
+Nginx
+    ↓
+HTTP response
+```
+
+### Failure handling is automatic
+
+We did not manually remove VM1 from the backend pool when Nginx stopped.
+
+The sequence was:
+
+```text
+VM1 healthy
+    ↓
+receives traffic
+
+Nginx stopped
+    ↓
+health probe fails
+    ↓
+VM1 excluded from new traffic
+
+Nginx restarted
+    ↓
+health probe succeeds
+    ↓
+VM1 eligible again
+```
+
+---
+
+## 15. Final Architecture
+
+```text
+                         Internet
+                            |
+                            | HTTP :80
+                            v
+                  +---------------------+
+                  | Static Public IP    |
+                  | 20.207.206.109      |
+                  +----------+----------+
+                             |
+                             v
+                  +---------------------+
+                  | Azure Load Balancer |
+                  | Standard            |
+                  +----------+----------+
+                             |
+                    Backend Pool
+                  /                     \
+                 /                       \
+                v                         v
+       +----------------+        +----------------+
+       | VM1            |        | VM2            |
+       | 10.10.1.4      |        | 10.10.2.4      |
+       | subnet1        |        | subnet2        |
+       | Nginx          |        | Nginx          |
+       +----------------+        +----------------+
+          Hello VM1                 Hello VM2
+
+                 Health Probe
+                  HTTP :80 /
+```
+
+---
+
+## Lab Status
+
+```text
+Azure Standard Load Balancer Lab
+Status: COMPLETE
+
+✓ Resource group
+✓ VNet
+✓ Two subnets
+✓ Two backend VMs
+✓ Nginx
+✓ Backend pool
+✓ Standard Static Public IP
+✓ Standard Load Balancer
+✓ HTTP health probe
+✓ Load-balancing rule
+✓ NSG configuration
+✓ Traffic distribution test
+✓ Backend failure test
+✓ Backend recovery test
+```
+
+## Key Takeaway
+
+The most important lesson from this lab:
+
+> **Azure Load Balancer distributes traffic only among healthy backends. Health probes determine backend eligibility, while NSGs determine whether the required network traffic is permitted.**
