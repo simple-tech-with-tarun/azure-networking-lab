@@ -1,0 +1,338 @@
+Absolutely. Keep the **session log** focused on what we actually did and learned during the lab, rather than turning it into a polished reference document.
+
+# Session Log — Azure NSG Lab
+
+## Lab Objective
+
+Understand how Azure Network Security Groups (NSGs) control inbound and outbound network traffic at the subnet and NIC levels.
+
+---
+
+## Environment
+
+- Resource Group: `az-nsg-lab-rg`
+- Location: `centralindia`
+- VNet: `az-nsg-lab-net`
+- Subnet 1: `az-nsg-lab-subnet1` — `10.0.1.0/24`
+- Subnet 2: `az-nsg-lab-subnet2` — `10.0.2.0/24`
+- VM1: `az-nsg-lab-vm1` — `10.0.1.4`
+- VM2: `az-nsg-lab-vm2` — `10.0.2.4`
+- VM2 Public IP: `40.80.87.71`
+- VM2 NSG: `az-nsg-lab-vm2NSG`
+
+VM size used: `Standard_D2s_v5`
+
+---
+
+## 1. Created the Network
+
+Created the resource group and VNet with two subnets.
+
+Initial VNet:
+
+```text
+VNet: 10.0.0.0/16
+
+Subnet 1: 10.0.1.0/24
+Subnet 2: 10.0.2.0/24
+```
+
+There was an initial typo while creating the VNet where the space after `--name` was missed. The resulting VNet name was `az-nsg-lab-net`, so subsequent commands were corrected to use that name.
+
+---
+
+## 2. Created the NSG
+
+Created:
+
+```text
+az-nsg-lab-subnet2-nsg
+```
+
+Initially associated this NSG with subnet 2.
+
+Examined the default NSG rules and observed that Azure includes default rules such as:
+
+- Allow inbound traffic from `VirtualNetwork`
+- Allow inbound traffic from `AzureLoadBalancer`
+- Deny all other inbound traffic
+- Allow outbound traffic to `VirtualNetwork`
+- Allow outbound traffic to `Internet`
+- Deny all other outbound traffic
+
+Important observation:
+
+NSGs are evaluated according to rule priority, with lower numbers evaluated first.
+
+---
+
+## 3. Understanding NSG Association
+
+Initially associated the NSG with subnet 2:
+
+```text
+Subnet 2
+   │
+   └── az-nsg-lab-subnet2-nsg
+```
+
+We later removed the subnet-level NSG to demonstrate NIC-level NSG behaviour.
+
+VM2 also had a NIC-level NSG:
+
+```text
+VM2
+ │
+ └── VM2 NIC
+       │
+       └── az-nsg-lab-vm2NSG
+```
+
+Important distinction learned:
+
+The NSG's name or rule does not indicate which subnet it belongs to. The actual association must be checked on the subnet or NIC resource.
+
+---
+
+## 4. Baseline Testing
+
+Tested TCP/22 from VM1 to VM2:
+
+```text
+VM1 10.0.1.4
+       │
+       │ TCP/22
+       ▼
+VM2 10.0.2.4
+```
+
+The connection was initially open.
+
+Also tested VM2's public IP from the laptop:
+
+```text
+40.80.87.71:22
+```
+
+The result was blocked when the subnet-level NSG contained a deny rule.
+
+This demonstrated that NSG rules can restrict access to a public-facing VM.
+
+---
+
+## 5. Inbound SSH Rule
+
+Created an inbound rule on VM2's NIC NSG:
+
+```text
+Name: allow-inbound-ssh-from-subnet1
+Priority: 100
+Direction: Inbound
+Access: Allow
+Protocol: TCP
+Source: 10.0.1.0/24
+Destination: 10.0.2.0/24
+Destination Port: 22
+```
+
+The intention was:
+
+> Allow SSH traffic to VM2 when the source is subnet 1.
+
+Test:
+
+```text
+VM1 → VM2:22
+```
+
+Result:
+
+```text
+SSH_PORT_OPEN
+```
+
+Important understanding:
+
+The source address in an NSG rule does not indicate where the NSG is associated.
+
+`10.0.1.0/24` is simply the traffic source being permitted.
+
+---
+
+## 6. Public IP Allowlist
+
+Found the laptop's public IP:
+
+```text
+103.79.249.47
+```
+
+Used `/32` to represent one specific IP:
+
+```text
+103.79.249.47/32
+```
+
+Created:
+
+```text
+Name: allow-ssh-from-my-ip
+Priority: 110
+Direction: Inbound
+Access: Allow
+Protocol: TCP
+Source: 103.79.249.47/32
+Destination: *
+Destination Port: 22
+```
+
+Tested:
+
+```powershell
+Test-NetConnection 40.80.87.71 -Port 22
+```
+
+Result:
+
+```text
+TcpTestSucceeded : True
+```
+
+Important observation:
+
+The laptop reported:
+
+```text
+SourceAddress : 192.168.8.4
+```
+
+but Azure saw the public source IP:
+
+```text
+103.79.249.47
+```
+
+because the local private address was translated through NAT.
+
+---
+
+## 7. Outbound NSG Rule
+
+First tested VM2 → VM1:
+
+```text
+VM2 10.0.2.4
+       │
+       │ ping
+       ▼
+VM1 10.0.1.4
+```
+
+Baseline result:
+
+```text
+4 packets transmitted
+4 received
+0% packet loss
+```
+
+Created an outbound deny rule:
+
+```text
+Name: deny-outbound-to-subnet1
+Priority: 200
+Direction: Outbound
+Access: Deny
+Protocol: *
+Source: 10.0.2.0/24
+Destination: 10.0.1.0/24
+Destination Port: *
+```
+
+Tested VM2 → VM1 again.
+
+Result:
+
+```text
+4 packets transmitted
+0 received
+100% packet loss
+```
+
+This demonstrated that NSGs control outbound traffic as well as inbound traffic.
+
+---
+
+## 8. Rule Priority Understanding
+
+Learned that priority numbers are evaluated independently for inbound and outbound rules.
+
+For example:
+
+```text
+Inbound priority 100
+```
+
+and
+
+```text
+Outbound priority 100
+```
+
+can coexist because they belong to different directions.
+
+Priority conflicts matter between rules in the same NSG and same direction.
+
+---
+
+## 9. Two-Sided Traffic Evaluation
+
+One of the main concepts learned during the lab:
+
+Traffic can be allowed to leave the source but still be blocked when entering the destination.
+
+Example:
+
+```text
+VM1
+ │
+ │ Outbound NSG → ALLOW
+ │
+ ▼
+VM2
+ │
+ │ Inbound NSG → DENY
+ X
+```
+
+Therefore, when troubleshooting connectivity, we should ask two questions:
+
+1. Can the traffic leave the source?
+2. Can the traffic enter the destination?
+
+Both sides need to permit the traffic.
+
+This was compared to a street with gates on both ends: opening one gate does not help if the other gate is closed.
+
+---
+
+## Key Takeaways
+
+- NSGs are stateful network traffic filters.
+- NSGs can be associated with subnets or network interfaces.
+- An NSG rule describes traffic conditions; it does not identify the resource where the NSG is attached.
+- Lower priority numbers are evaluated before higher priority numbers.
+- Inbound and outbound rule priorities are independent.
+- `/32` represents a single IPv4 address.
+- Public Internet traffic reaches Azure with the public source IP after NAT.
+- A source-side allow does not override a destination-side deny.
+- Both outbound and inbound filtering matter when troubleshooting connectivity.
+- Default NSG rules provide baseline allow/deny behaviour when custom rules do not match.
+
+---
+
+## Lab Status
+
+**Completed**
+
+Advanced topics such as Service Tags, Application Security Groups, NSG flow logs, and integration with Azure Firewall are intentionally left for future labs.
