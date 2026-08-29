@@ -1,503 +1,1387 @@
-Absolutely. Here’s the session log content for the **Azure Load Balancer lab**, capturing what we actually built, tested, learned, and verified.
+You're right. The `README` is the **conceptual/documentation layer**; `session.log` should be the **command-driven record of what we actually did**, including the troubleshooting steps and outputs that mattered.
 
+Here is the corrected full `session.log` content, based on the session you provided.
+
+```text
 # Session Log — Azure Load Balancer Lab
 
 ## Session Objective
 
-Build and validate an Azure Standard Public Load Balancer using two Ubuntu VMs as backend servers.
+Build and troubleshoot an Azure Standard Public Load Balancer using two Ubuntu VMs as backend servers.
 
-The lab was designed to understand:
+Primary focus:
 
-- Azure Load Balancer architecture
-- Frontend public IP
-- Backend address pools
+- Azure CLI commands
+- Resource creation
+- Network configuration
+- NSG configuration
+- Load Balancer configuration
 - Health probes
+- Backend pool
 - Load-balancing rules
-- NSG requirements
-- Backend health and failure detection
-- Traffic distribution
-- Backend recovery
+- Traffic testing
+- Backend failure/recovery
+- Outbound SNAT
+- Default outbound access
+- VM lifecycle troubleshooting
+- Final connectivity validation
 
----
 
-## 1. Lab Resource Group
+============================================================
+1. RESOURCE GROUP
+============================================================
 
-Created the resource group:
+Created the lab resource group.
 
-```text
-Resource Group: az-lb-lab-rg
-Location: centralindia
-Tags:
-  owner=tarun
-  AutoDelete=Yes
-```
+Command:
 
-The previous NSG lab resource group was deleted before starting this lab.
+az group create `
+  -n az-lb-lab-rg `
+  -l centralindia `
+  --tags owner=tarun AutoDelete=Yes
 
----
 
-## 2. Virtual Network
+============================================================
+2. VIRTUAL NETWORK
+============================================================
 
-Created:
+Created the VNet and first subnet.
 
-```text
-VNet: az-lb-lab-vnet
-Address Space: 10.10.0.0/16
-```
+Command:
 
-Subnets:
+az network vnet create `
+  -g az-lb-lab-rg `
+  -l centralindia `
+  -n az-lb-lab-vnet `
+  --address-prefixes 10.10.0.0/16 `
+  --subnet-name az-lb-lab-subnet1 `
+  --subnet-prefixes 10.10.1.0/24 `
+  --tags owner=tarun
 
-```text
-az-lb-lab-subnet1 → 10.10.1.0/24
-az-lb-lab-subnet2 → 10.10.2.0/24
-```
 
-The two backend VMs were intentionally placed in different subnets while remaining inside the same VNet.
+Created the second subnet.
 
----
+Command:
 
-## 3. Backend VMs
+az network vnet subnet create `
+  -g az-lb-lab-rg `
+  --vnet-name az-lb-lab-vnet `
+  -n az-lb-lab-subnet2 `
+  --address-prefixes 10.10.2.0/24
 
-Created two Ubuntu 22.04 VMs.
 
-### VM1
+Verified the subnets.
 
-```text
-Name: az-lb-lab-vm1
-Private IP: 10.10.1.4
-Subnet: az-lb-lab-subnet1
-```
+Command:
 
-### VM2
+az network vnet subnet list `
+  -g az-lb-lab-rg `
+  --vnet-name az-lb-lab-vnet `
+  --query "[].{Subnet:name,Prefix:addressPrefix}" `
+  -o table
 
-```text
-Name: az-lb-lab-vm2
-Private IP: 10.10.2.4
-Subnet: az-lb-lab-subnet2
-```
 
-NICs:
+Expected:
 
-```text
-az-lb-lab-vm1VMNic → 10.10.1.4
-az-lb-lab-vm2VMNic → 10.10.2.4
-```
+Subnet                 Prefix
+---------------------  -------------
+az-lb-lab-subnet1      10.10.1.0/24
+az-lb-lab-subnet2      10.10.2.0/24
 
----
 
-## 4. Nginx Backend Services
+============================================================
+3. BACKEND VMs
+============================================================
 
-Installed Nginx on both VMs.
+Created VM1 in subnet1.
 
-Configured different responses so that traffic distribution could be observed:
+Command:
 
-```text
-VM1 → Hello from VM1
-VM2 → Hello from VM2
-```
+az vm create `
+  -g az-lb-lab-rg `
+  -n az-lb-lab-vm1 `
+  -l centralindia `
+  --image Ubuntu2204 `
+  --size Standard_D2s_v5 `
+  --vnet-name az-lb-lab-vnet `
+  --subnet az-lb-lab-subnet1 `
+  --admin-username azureuser `
+  --generate-ssh-keys `
+  --public-ip-sku Standard `
+  --tags owner=tarun
 
-Verified directly from inside the VNet:
 
-```text
-VM1 → VM2
-curl http://10.10.2.4
-→ Hello from VM2
+VM1:
 
-VM2 → VM1
-curl http://10.10.1.4
-→ Hello from VM1
-```
+Name:
+az-lb-lab-vm1
 
-This confirmed that both backend applications were reachable over HTTP.
+Private IP:
+10.10.1.4
 
----
 
-## 5. NSG Configuration
+Created VM2 in subnet2.
 
-Both VM NICs had NSGs attached.
+Command:
 
-Initially, each VM had:
+az vm create `
+  -g az-lb-lab-rg `
+  -n az-lb-lab-vm2 `
+  -l centralindia `
+  --image Ubuntu2204 `
+  --size Standard_D2s_v5 `
+  --vnet-name az-lb-lab-vnet `
+  --subnet az-lb-lab-subnet2 `
+  --admin-username azureuser `
+  --generate-ssh-keys `
+  --public-ip-sku Standard `
+  --tags owner=tarun
 
-```text
-default-allow-ssh
-Priority: 1000
-Direction: Inbound
-Access: Allow
-Protocol: TCP
-Port: 22
-```
 
-Added HTTP access:
+VM2:
 
-```text
-allow-http
-Priority: 200
-Direction: Inbound
-Access: Allow
-Protocol: TCP
-Source: *
-Destination: *
-Port: 80
-```
+Name:
+az-lb-lab-vm2
 
-This was necessary because the Standard Load Balancer requires the backend to allow the relevant inbound traffic.
+Private IP:
+10.10.2.4
 
----
 
-## 6. Public IP
+Verified NIC addresses.
 
-Created:
+Command:
 
-```text
-Public IP: az-lb-lab-pip
-IP Address: 20.207.206.109
-SKU: Standard
-Allocation: Static
-Location: centralindia
-```
+az network nic list `
+  -g az-lb-lab-rg `
+  --query "[].{NIC:name,PrivateIP:ipConfigurations[0].privateIPAddress}" `
+  -o table
 
-This public IP became the frontend entry point for the Load Balancer.
-
----
-
-## 7. Azure Load Balancer
-
-Created:
-
-```text
-Load Balancer: az-lb-lab-lb
-SKU: Standard
-Location: centralindia
-```
-
-Frontend:
-
-```text
-Frontend name: az-lb-lab-frontend
-Public IP: az-lb-lab-pip
-```
-
-Backend pool automatically created:
-
-```text
-az-lb-lab-lbbepool
-```
-
-Added:
-
-```text
-vm1 → 10.10.1.4
-vm2 → 10.10.2.4
-```
-
-Verified backend pool membership:
-
-```text
-Name    IP
-vm1     10.10.1.4
-vm2     10.10.2.4
-```
-
----
-
-## 8. Health Probe
-
-Created an HTTP health probe:
-
-```text
-Name: az-lb-lab-http-probe
-Protocol: HTTP
-Port: 80
-Path: /
-Interval: 15 seconds
-```
-
-The probe was associated with the load-balancing rule.
-
-Important concept:
-
-The backend pool contains the VMs, but the health probe determines whether a backend is considered healthy and eligible to receive traffic.
-
----
-
-## 9. Load-Balancing Rule
-
-Created:
-
-```text
-Rule: az-lb-lab-http-rule
-Protocol: TCP
-
-Frontend:
-  Port 80
-
-Backend:
-  Port 80
-
-Backend Pool:
-  az-lb-lab-lbbepool
-
-Probe:
-  az-lb-lab-http-probe
-```
-
-Architecture:
-
-```text
-Client
-  |
-  | TCP :80
-  v
-20.207.206.109
-  |
-  v
-Azure Load Balancer
-  |
-  +------ VM1 10.10.1.4 :80
-  |
-  +------ VM2 10.10.2.4 :80
-```
-
----
-
-## 10. Initial Public Load Balancer Test
-
-Initial request to the public IP failed:
-
-```text
-curl.exe http://20.207.206.109
-```
-
-The connection timed out.
-
-Troubleshooting showed that Nginx was running on VM1:
-
-```text
-LISTEN 0 511 0.0.0.0:80
-```
-
-The VM NSGs, however, only allowed SSH at that point.
-
-Added the `allow-http` NSG rule to both VM NSGs.
-
-After that, the Load Balancer became reachable.
-
----
-
-## 11. Traffic Distribution Test
-
-Executed:
-
-```powershell
-1..10 | ForEach-Object {
-    curl.exe -s http://20.207.206.109
-}
-```
-
-Observed:
-
-```text
-Hello from VM1
-Hello from VM2
-Hello from VM1
-Hello from VM2
-Hello from VM1
-Hello from VM2
-Hello from VM1
-Hello from VM2
-Hello from VM1
-Hello from VM2
-```
-
-This confirmed that the Load Balancer was distributing traffic across both backend VMs.
-
-Important observation:
-
-Azure Load Balancer should not be thought of as a simplistic round-robin mechanism. Its default load distribution is flow-based, using a hash of connection characteristics.
-
----
-
-## 12. Backend Failure Experiment
-
-To demonstrate health-probe behavior, Nginx was deliberately stopped on VM1:
-
-```bash
-sudo systemctl stop nginx
-```
-
-VM1 was still present in the backend pool, but its HTTP service was no longer responding.
-
-Repeated requests to the public Load Balancer IP produced:
-
-```text
-Hello from VM2
-Hello from VM2
-Hello from VM2
-Hello from VM2
-Hello from VM2
-Hello from VM2
-Hello from VM2
-Hello from VM2
-Hello from VM2
-Hello from VM2
-```
-
-This demonstrated that the Load Balancer detected VM1 as unhealthy through the HTTP health probe and stopped sending new traffic to it.
-
-VM2 continued serving traffic normally.
-
----
-
-## 13. Backend Recovery
-
-Started Nginx again on VM1:
-
-```bash
-sudo systemctl start nginx
-```
-
-Verified locally:
-
-```bash
-curl http://localhost
-```
 
 Result:
 
-```text
+VM1 NIC → 10.10.1.4
+VM2 NIC → 10.10.2.4
+
+
+============================================================
+4. INSTALL NGINX
+============================================================
+
+Installed Nginx on VM1.
+
+Command:
+
+az vm run-command invoke `
+  -g az-lb-lab-rg `
+  -n az-lb-lab-vm1 `
+  --command-id RunShellScript `
+  --scripts "sudo apt-get update -y && sudo apt-get install -y nginx && echo 'Hello from VM1' | sudo tee /var/www/html/index.html"
+
+
+Installed Nginx on VM2.
+
+Command:
+
+az vm run-command invoke `
+  -g az-lb-lab-rg `
+  -n az-lb-lab-vm2 `
+  --command-id RunShellScript `
+  --scripts "sudo apt-get update -y && sudo apt-get install -y nginx && echo 'Hello from VM2' | sudo tee /var/www/html/index.html"
+
+
+============================================================
+5. VERIFY NGINX / PRIVATE CONNECTIVITY
+============================================================
+
+Tested VM2 from VM1:
+
+Command:
+
+az vm run-command invoke `
+  -g az-lb-lab-rg `
+  -n az-lb-lab-vm1 `
+  --command-id RunShellScript `
+  --scripts "curl -s http://10.10.2.4 && echo"
+
+
+Result:
+
+Hello from VM2
+
+
+Tested VM1 from VM2:
+
+Command:
+
+az vm run-command invoke `
+  -g az-lb-lab-rg `
+  -n az-lb-lab-vm2 `
+  --command-id RunShellScript `
+  --scripts "curl -s http://10.10.1.4 && echo"
+
+
+Result:
+
 Hello from VM1
-```
 
-This confirmed that the backend application had recovered.
 
-After the health probe detected the recovered service, VM1 became eligible to receive Load Balancer traffic again.
+Private connectivity between the two subnets was confirmed.
 
+
+============================================================
+6. NSG CONFIGURATION
+============================================================
+
+Checked the NIC / NSG configuration.
+
+Initially the VM NSGs contained the default SSH rule.
+
+HTTP access was added to VM1.
+
+Command:
+
+az network nsg rule create `
+  -g az-lb-lab-rg `
+  --nsg-name az-lb-lab-vm1NSG `
+  --name allow-http `
+  --priority 200 `
+  --direction Inbound `
+  --access Allow `
+  --protocol Tcp `
+  --source-address-prefixes "*" `
+  --destination-address-prefixes "*" `
+  --destination-port-ranges 80
+
+
+Added the same rule to VM2.
+
+Command:
+
+az network nsg rule create `
+  -g az-lb-lab-rg `
+  --nsg-name az-lb-lab-vm2NSG `
+  --name allow-http `
+  --priority 200 `
+  --direction Inbound `
+  --access Allow `
+  --protocol Tcp `
+  --source-address-prefixes "*" `
+  --destination-address-prefixes "*" `
+  --destination-port-ranges 80
+
+
+============================================================
+7. PUBLIC IP
+============================================================
+
+Created a Standard Static Public IP.
+
+Command:
+
+az network public-ip create `
+  -g az-lb-lab-rg `
+  -n az-lb-lab-pip `
+  -l centralindia `
+  --sku Standard `
+  --allocation-method Static `
+  --tags owner=tarun
+
+
+Public IP:
+
+20.207.206.109
+
+
+Verified:
+
+Command:
+
+az network public-ip show `
+  -g az-lb-lab-rg `
+  -n az-lb-lab-pip `
+  --query "{Name:name,IP:ipAddress,SKU:sku.name,Allocation:publicIPAllocationMethod}" `
+  -o table
+
+
+============================================================
+8. CREATE LOAD BALANCER
+============================================================
+
+Created the Standard Public Load Balancer.
+
+Command:
+
+az network lb create `
+  -g az-lb-lab-rg `
+  -n az-lb-lab-lb `
+  -l centralindia `
+  --sku Standard `
+  --public-ip-address az-lb-lab-pip `
+  --frontend-ip-name az-lb-lab-frontend `
+  --tags owner=tarun
+
+
+Backend pool:
+
+az-lb-lab-lbbepool
+
+
+============================================================
+9. ADD BACKEND VMs
+============================================================
+
+Added VM1 to the backend pool.
+
+Command:
+
+az network lb address-pool address add `
+  -g az-lb-lab-rg `
+  --lb-name az-lb-lab-lb `
+  --pool-name az-lb-lab-lbbepool `
+  -n vm1 `
+  --vnet az-lb-lab-vnet `
+  --ip-address 10.10.1.4
+
+
+Added VM2.
+
+Command:
+
+az network lb address-pool address add `
+  -g az-lb-lab-rg `
+  --lb-name az-lb-lab-lb `
+  --pool-name az-lb-lab-lbbepool `
+  -n vm2 `
+  --vnet az-lb-lab-vnet `
+  --ip-address 10.10.2.4
+
+
+Verified:
+
+Command:
+
+az network lb address-pool address list `
+  -g az-lb-lab-rg `
+  --lb-name az-lb-lab-lb `
+  --pool-name az-lb-lab-lbbepool `
+  --query "[].{Name:name,IP:backendAddress.ipAddress}" `
+  -o table
+
+
+Result:
+
+Name    IP
+------  --------
+vm1     10.10.1.4
+vm2     10.10.2.4
+
+
+============================================================
+10. HEALTH PROBE
+============================================================
+
+Created HTTP health probe.
+
+Command:
+
+az network lb probe create `
+  -g az-lb-lab-rg `
+  --lb-name az-lb-lab-lb `
+  -n az-lb-lab-http-probe `
+  --protocol Http `
+  --port 80 `
+  --path /
+
+
+Configuration:
+
+Protocol: HTTP
+Port:     80
+Path:     /
+Interval: 15 seconds
+
+
+============================================================
+11. LOAD-BALANCING RULE
+============================================================
+
+Created the TCP load-balancing rule.
+
+Command:
+
+az network lb rule create `
+  -g az-lb-lab-rg `
+  --lb-name az-lb-lab-lb `
+  -n az-lb-lab-http-rule `
+  --frontend-ip-name az-lb-lab-frontend `
+  --frontend-port 80 `
+  --backend-pool-name az-lb-lab-lbbepool `
+  --backend-port 80 `
+  --protocol Tcp `
+  --probe-name az-lb-lab-http-probe
+
+
+Traffic path:
+
+Client
+  ↓
+20.207.206.109:80
+  ↓
+Load Balancer
+  ↓
+Backend Pool
+  ↓
+10.10.1.4:80 / 10.10.2.4:80
+
+
+============================================================
+12. INITIAL LOAD BALANCER TEST
+============================================================
+
+Initial test:
+
+Command:
+
+curl.exe http://20.207.206.109
+
+
+Result:
+
+Connection timed out.
+
+
+Started troubleshooting layer by layer.
+
+
+Checked Nginx on VM1.
+
+Command:
+
+az vm run-command invoke `
+  -g az-lb-lab-rg `
+  -n az-lb-lab-vm1 `
+  --command-id RunShellScript `
+  --scripts "sudo ss -lntp | grep ':80 '"
+
+
+Result showed:
+
+LISTEN ... 0.0.0.0:80 ...
+
+
+Nginx was listening correctly.
+
+The NSGs were then identified as the missing piece because HTTP/80 was not initially allowed.
+
+Added:
+
+allow-http
+
+to both VM NSGs.
+
+Retested the Load Balancer.
+
+
+============================================================
+13. LOAD BALANCER TRAFFIC TEST
+============================================================
+
+Command:
+
+1..10 | ForEach-Object {
+    curl.exe -s http://20.207.206.109
+}
+
+
+Observed responses from both backend VMs:
+
+Hello from VM1
+Hello from VM2
+Hello from VM1
+Hello from VM2
+...
+
+
+Load Balancer traffic distribution was confirmed.
+
+
+Important observation:
+
+Azure Load Balancer is flow-based rather than a simplistic
+request-by-request round-robin mechanism.
+
+
+============================================================
+14. BACKEND FAILURE TEST
+============================================================
+
+Stopped Nginx on VM1.
+
+Command:
+
+az vm run-command invoke `
+  -g az-lb-lab-rg `
+  -n az-lb-lab-vm1 `
+  --command-id RunShellScript `
+  --scripts "sudo systemctl stop nginx"
+
+
+VM1 remained in the backend pool.
+
+However, the HTTP health probe began failing.
+
+Tested the Load Balancer repeatedly.
+
+Result:
+
+Hello from VM2
+Hello from VM2
+Hello from VM2
+...
+
+
+VM1 was still configured as a backend but was no longer eligible
+for new traffic because it was unhealthy.
+
+
+============================================================
+15. BACKEND RECOVERY
+============================================================
+
+Started Nginx again on VM1.
+
+Command:
+
+az vm run-command invoke `
+  -g az-lb-lab-rg `
+  -n az-lb-lab-vm1 `
+  --command-id RunShellScript `
+  --scripts "sudo systemctl start nginx"
+
+
+Verified locally:
+
+az vm run-command invoke `
+  -g az-lb-lab-rg `
+  -n az-lb-lab-vm1 `
+  --command-id RunShellScript `
+  --scripts "curl -s http://localhost"
+
+
+Result:
+
+Hello from VM1
+
+
+After the health probe detected the recovery, VM1 became eligible
+for Load Balancer traffic again.
+
+
+============================================================
+16. REMOVE VM PUBLIC IPs
+============================================================
+
+Removed the public IP associations from both VM NICs.
+
+Final NIC state:
+
+VM1:
+Private IP: 10.10.1.4
+Public IP: null
+
+VM2:
+Private IP: 10.10.2.4
+Public IP: null
+
+
+Verified VM2:
+
+az network nic show `
+  -g az-lb-lab-rg `
+  -n az-lb-lab-vm2VMNic `
+  --query "{NIC:name,IPConfig:ipConfigurations[0].name,PrivateIP:ipConfigurations[0].privateIPAddress,PublicIP:ipConfigurations[0].publicIPAddress,Subnet:ipConfigurations[0].subnet.id}" `
+  -o json
+
+
+Result:
+
+{
+  "IPConfig": "ipconfigaz-lb-lab-vm2",
+  "NIC": "az-lb-lab-vm2VMNic",
+  "PrivateIP": "10.10.2.4",
+  "PublicIP": null,
+  "Subnet": ".../subnets/az-lb-lab-subnet2"
+}
+
+
+Verified VM1:
+
+az network nic show `
+  -g az-lb-lab-rg `
+  -n az-lb-lab-vm1VMNic `
+  --query "{NIC:name,IPConfig:ipConfigurations[0].name,PrivateIP:ipConfigurations[0].privateIPAddress,PublicIP:ipConfigurations[0].publicIPAddress,Subnet:ipConfigurations[0].subnet.id}" `
+  -o json
+
+
+Result:
+
+{
+  "IPConfig": "ipconfigaz-lb-lab-vm1",
+  "NIC": "az-lb-lab-vm1VMNic",
+  "PrivateIP": "10.10.1.4",
+  "PublicIP": null,
+  "Subnet": ".../subnets/az-lb-lab-subnet1"
+}
+
+
+============================================================
+17. VERIFY LOAD BALANCER BACKEND POOL
+============================================================
+
+Command:
+
+az network lb show `
+  -g az-lb-lab-rg `
+  -n az-lb-lab-lb `
+  --query "backendAddressPools[].loadBalancerBackendAddresses[].{Name:name,IP:ipAddress,VNet:virtualNetwork.id}" `
+  -o table
+
+
+Result:
+
+Name    IP         VNet
+------  ---------  ----------------
+vm1     10.10.1.4  az-lb-lab-vnet
+vm2     10.10.2.4  az-lb-lab-vnet
+
+
+Removing the VM public IPs did not remove the backend pool entries.
+
+
+============================================================
+18. INITIAL OUTBOUND CONNECTIVITY TEST
+============================================================
+
+Even after removing the VM public IPs, the VMs could still reach
+the internet.
+
+VM1:
+
+az vm run-command invoke `
+  -g az-lb-lab-rg `
+  -n az-lb-lab-vm1 `
+  --command-id RunShellScript `
+  --scripts "curl -4 -s https://api.ipify.org && echo"
+
+
+Result:
+
+20.207.198.126
+
+
+VM2:
+
+az vm run-command invoke `
+  -g az-lb-lab-rg `
+  -n az-lb-lab-vm2 `
+  --command-id RunShellScript `
+  --scripts "curl -4 -s https://api.ipify.org && echo"
+
+
+Result:
+
+20.204.43.214
+
+
+This demonstrated that VM-level public IP removal did not by itself
+eliminate outbound internet connectivity.
+
+
+============================================================
+19. INSPECT VM ROUTING
+============================================================
+
+Checked the routing table on VM1.
+
+Command:
+
+az vm run-command invoke `
+  -g az-lb-lab-rg `
+  -n az-lb-lab-vm1 `
+  --command-id RunShellScript `
+  --scripts "ip route; echo '---'; curl -4 -s --max-time 10 https://api.ipify.org; echo"
+
+
+Result:
+
+default via 10.10.1.1 dev eth0 proto dhcp src 10.10.1.4 metric 100
+10.10.1.0/24 dev eth0 proto kernel scope link src 10.10.1.4 metric 100
+10.10.1.1 dev eth0 proto dhcp scope link src 10.10.1.4 metric 100
+168.63.129.16 via 10.10.1.1 dev eth0 proto dhcp src 10.10.1.4 metric 100
+169.254.169.254 via 10.10.1.1 dev eth0 proto dhcp src 10.10.1.4 metric 100
 ---
+20.207.198.126
 
-## 14. Important Concepts Learned
 
-### Backend pool membership ≠ backend health
+Checked VM2.
 
-A VM can remain registered in the backend pool while being temporarily excluded from traffic because its health probe is failing.
+Command:
 
-### Health probes control backend eligibility
+az vm run-command invoke `
+  -g az-lb-lab-rg `
+  -n az-lb-lab-vm2 `
+  --command-id RunShellScript `
+  --scripts "ip route; echo '---'; curl -4 -s --max-time 10 https://api.ipify.org; echo"
 
-The health probe continuously checks:
 
-```text
-VM :80 /
-```
+Result:
 
-If the probe fails, the backend is considered unhealthy.
-
-### NSGs still matter
-
-The Load Balancer does not bypass the VM's network security controls.
-
-The backend NSG must permit the required traffic.
-
-### Load Balancer and Nginx have different responsibilities
-
-```text
-Azure Load Balancer
-    ↓
-Receives client traffic
-    ↓
-Selects healthy backend
-    ↓
-VM
-    ↓
-Nginx
-    ↓
-HTTP response
-```
-
-### Failure handling is automatic
-
-We did not manually remove VM1 from the backend pool when Nginx stopped.
-
-The sequence was:
-
-```text
-VM1 healthy
-    ↓
-receives traffic
-
-Nginx stopped
-    ↓
-health probe fails
-    ↓
-VM1 excluded from new traffic
-
-Nginx restarted
-    ↓
-health probe succeeds
-    ↓
-VM1 eligible again
-```
-
+default via 10.10.2.1 dev eth0 proto dhcp src 10.10.2.4 metric 100
+10.10.2.0/24 dev eth0 proto kernel scope link src 10.10.2.4 metric 100
+10.10.2.1 dev eth0 proto dhcp scope link src 10.10.2.4 metric 100
+168.63.129.16 via 10.10.2.1 dev eth0 proto dhcp src 10.10.2.4 metric 100
+169.254.169.254 via 10.10.2.1 dev eth0 proto dhcp src 10.10.2.4 metric 100
 ---
+20.204.43.214
 
-## 15. Final Architecture
 
-```text
-                         Internet
-                            |
-                            | HTTP :80
-                            v
-                  +---------------------+
-                  | Static Public IP    |
-                  | 20.207.206.109      |
-                  +----------+----------+
-                             |
-                             v
-                  +---------------------+
-                  | Azure Load Balancer |
-                  | Standard            |
-                  +----------+----------+
-                             |
-                    Backend Pool
-                  /                     \
-                 /                       \
-                v                         v
-       +----------------+        +----------------+
-       | VM1            |        | VM2            |
-       | 10.10.1.4      |        | 10.10.2.4      |
-       | subnet1        |        | subnet2        |
-       | Nginx          |        | Nginx          |
-       +----------------+        +----------------+
-          Hello VM1                 Hello VM2
+The VMs were using their subnet gateway for outbound traffic.
 
-                 Health Probe
-                  HTTP :80 /
-```
 
----
+============================================================
+20. LOAD BALANCER OUTBOUND RULE
+============================================================
 
-## Lab Status
+Created an outbound rule.
 
-```text
+Command:
+
+az network lb outbound-rule create `
+  -g az-lb-lab-rg `
+  --lb-name az-lb-lab-lb `
+  -n az-lb-lab-outbound `
+  --protocol All `
+  --frontend-ip-configs az-lb-lab-frontend `
+  --backend-pool az-lb-lab-lbbepool `
+  --idle-timeout 15 `
+  --allocated-outbound-ports 1024 `
+  --enable-tcp-reset true
+
+
+The initial creation attempt failed.
+
+Azure returned:
+
+LoadBalancingRuleMustDisableSNATSinceSameFrontendIPConfigurationIsReferencedByOutboundRule
+
+
+The existing load-balancing rule was updated to disable outbound
+SNAT:
+
+Command:
+
+az network lb rule update `
+  -g az-lb-lab-rg `
+  --lb-name az-lb-lab-lb `
+  -n az-lb-lab-http-rule `
+  --disable-outbound-snat true
+
+
+The outbound rule was then created successfully.
+
+
+Verified the outbound rule:
+
+Command:
+
+az network lb outbound-rule show `
+  -g az-lb-lab-rg `
+  --lb-name az-lb-lab-lb `
+  -n az-lb-lab-outbound `
+  --query "{Name:name,Protocol:protocol,IdleTimeout:idleTimeoutInMinutes,AllocatedPorts:allocatedOutboundPorts,Frontend:frontendIPConfigurations[].id,BackendPool:backendAddressPool.id}" `
+  -o json
+
+
+Result:
+
+{
+  "AllocatedPorts": 1024,
+  "BackendPool": ".../backendAddressPools/az-lb-lab-lbbepool",
+  "Frontend": [
+    ".../frontendIPConfigurations/az-lb-lab-frontend"
+  ],
+  "IdleTimeout": 15,
+  "Name": "az-lb-lab-outbound",
+  "Protocol": "All"
+}
+
+
+============================================================
+21. DISABLE DEFAULT OUTBOUND ACCESS
+============================================================
+
+Disabled default outbound access on subnet1.
+
+Command:
+
+az network vnet subnet update `
+  -g az-lb-lab-rg `
+  --vnet-name az-lb-lab-vnet `
+  -n az-lb-lab-subnet1 `
+  --default-outbound-access false
+
+
+Disabled default outbound access on subnet2.
+
+Command:
+
+az network vnet subnet update `
+  -g az-lb-lab-rg `
+  --vnet-name az-lb-lab-vnet `
+  -n az-lb-lab-subnet2 `
+  --default-outbound-access false
+
+
+Verified:
+
+Command:
+
+az network vnet subnet list `
+  -g az-lb-lab-rg `
+  --vnet-name az-lb-lab-vnet `
+  --query "[].{Subnet:name,Prefix:addressPrefix,DefaultOutboundAccess:defaultOutboundAccess}" `
+  -o table
+
+
+Expected:
+
+Subnet                 Prefix          DefaultOutboundAccess
+---------------------  --------------  ----------------------
+az-lb-lab-subnet1      10.10.1.0/24    False
+az-lb-lab-subnet2      10.10.2.0/24    False
+
+
+============================================================
+22. OUTBOUND ACCESS STILL WORKED
+============================================================
+
+Immediately after changing the subnet configuration, the running VMs
+were still able to reach the internet.
+
+VM1:
+
+az vm run-command invoke `
+  -g az-lb-lab-rg `
+  -n az-lb-lab-vm1 `
+  --command-id RunShellScript `
+  --scripts "curl -4 -s --max-time 10 https://api.ipify.org; echo"
+
+
+Result:
+
+20.207.198.126
+
+
+VM2:
+
+az vm run-command invoke `
+  -g az-lb-lab-rg `
+  -n az-lb-lab-vm2 `
+  --command-id RunShellScript `
+  --scripts "curl -4 -s --max-time 10 https://api.ipify.org; echo"
+
+
+Result:
+
+20.204.43.214
+
+
+This was unexpected because the subnet configuration already reported:
+
+defaultOutboundAccess: false
+
+
+============================================================
+23. VM LIFECYCLE TROUBLESHOOTING
+============================================================
+
+The VMs were restarted while investigating the networking behavior.
+
+VM1:
+
+az vm restart `
+  -g az-lb-lab-rg `
+  -n az-lb-lab-vm1
+
+
+Result:
+
+status: Succeeded
+
+
+VM2:
+
+az vm restart `
+  -g az-lb-lab-rg `
+  -n az-lb-lab-vm2
+
+
+Result:
+
+status: Succeeded
+
+
+VM state was checked.
+
+Command:
+
+az vm list `
+  -g az-lb-lab-rg `
+  --show-details `
+  --query "[].{VM:name,State:powerState,PrivateIP:networkProfile.networkInterfaces[0].id}" `
+  -o table
+
+
+VMs were running.
+
+
+During further testing VM2 was observed as:
+
+az-lb-lab-vm2  VM deallocated
+
+
+VM2 was started again:
+
+az vm start `
+  -g az-lb-lab-rg `
+  -n az-lb-lab-vm2
+
+
+VM1 was also started:
+
+az vm start `
+  -g az-lb-lab-rg `
+  -n az-lb-lab-vm1
+
+
+============================================================
+24. POST-LIFECYCLE OUTBOUND TEST
+============================================================
+
+After the VM lifecycle transition, outbound connectivity was tested
+again.
+
+VM2:
+
+az vm run-command invoke `
+  -g az-lb-lab-rg `
+  -n az-lb-lab-vm2 `
+  --command-id RunShellScript `
+  --scripts "curl -4 -s --max-time 10 https://api.ipify.org; echo"
+
+
+At this stage VM2 returned:
+
+20.207.198.126
+
+
+VM1 was then tested:
+
+az vm run-command invoke `
+  -g az-lb-lab-rg `
+  -n az-lb-lab-vm1 `
+  --command-id RunShellScript `
+  --scripts "curl -4 -s --max-time 10 https://api.ipify.org; echo"
+
+
+The final test after completing the subnet outbound-access
+configuration returned no public IP.
+
+
+============================================================
+25. FINAL OUTBOUND BLOCK TEST
+============================================================
+
+VM1:
+
+az vm run-command invoke `
+  -g az-lb-lab-rg `
+  -n az-lb-lab-vm1 `
+  --command-id RunShellScript `
+  --scripts "curl -4 -s --max-time 10 https://api.ipify.org; echo"
+
+
+Result:
+
+No output.
+
+
+VM2:
+
+az vm run-command invoke `
+  -g az-lb-lab-rg `
+  -n az-lb-lab-vm2 `
+  --command-id RunShellScript `
+  --scripts "curl -4 -s --max-time 10 https://api.ipify.org; echo"
+
+
+Result:
+
+No output.
+
+
+Outbound internet access was confirmed to be disabled.
+
+
+============================================================
+26. FINAL NETWORK VERIFICATION
+============================================================
+
+VM1:
+
+Private IP:
+10.10.1.4
+
+Public IP:
+null
+
+
+VM2:
+
+Private IP:
+10.10.2.4
+
+Public IP:
+null
+
+
+Backend pool:
+
+vm1 → 10.10.1.4
+vm2 → 10.10.2.4
+
+
+Subnet configuration:
+
+subnet1 → defaultOutboundAccess false
+subnet2 → defaultOutboundAccess false
+
+
+Load Balancer:
+
+Name:
+az-lb-lab-lb
+
+SKU:
+Standard
+
+Frontend:
+az-lb-lab-frontend
+
+Public IP:
+20.207.206.109
+
+Backend pool:
+az-lb-lab-lbbepool
+
+Health probe:
+az-lb-lab-http-probe
+
+Load-balancing rule:
+az-lb-lab-http-rule
+
+Outbound rule:
+az-lb-lab-outbound
+
+
+============================================================
+27. IMPORTANT COMMANDS FROM THE LAB
+============================================================
+
+### Resource inspection
+
+az network vnet subnet list `
+  -g az-lb-lab-rg `
+  --vnet-name az-lb-lab-vnet `
+  -o table
+
+
+az network nic show `
+  -g az-lb-lab-rg `
+  -n az-lb-lab-vm1VMNic `
+  -o json
+
+
+az network nic show `
+  -g az-lb-lab-rg `
+  -n az-lb-lab-vm2VMNic `
+  -o json
+
+
+### VM testing
+
+az vm run-command invoke `
+  -g az-lb-lab-rg `
+  -n az-lb-lab-vm1 `
+  --command-id RunShellScript `
+  --scripts "curl -s http://localhost"
+
+
+### Nginx control
+
+az vm run-command invoke `
+  -g az-lb-lab-rg `
+  -n az-lb-lab-vm1 `
+  --command-id RunShellScript `
+  --scripts "sudo systemctl stop nginx"
+
+
+az vm run-command invoke `
+  -g az-lb-lab-rg `
+  -n az-lb-lab-vm1 `
+  --command-id RunShellScript `
+  --scripts "sudo systemctl start nginx"
+
+
+### Load Balancer backend pool
+
+az network lb address-pool address list `
+  -g az-lb-lab-rg `
+  --lb-name az-lb-lab-lb `
+  --pool-name az-lb-lab-lbbepool `
+  -o table
+
+
+### Load Balancer inspection
+
+az network lb show `
+  -g az-lb-lab-rg `
+  -n az-lb-lab-lb `
+  -o json
+
+
+### Health probe
+
+az network lb probe show `
+  -g az-lb-lab-rg `
+  --lb-name az-lb-lab-lb `
+  -n az-lb-lab-http-probe `
+  -o json
+
+
+### Load-balancing rule
+
+az network lb rule show `
+  -g az-lb-lab-rg `
+  --lb-name az-lb-lab-lb `
+  -n az-lb-lab-http-rule `
+  -o json
+
+
+### Outbound rule
+
+az network lb outbound-rule show `
+  -g az-lb-lab-rg `
+  --lb-name az-lb-lab-lb `
+  -n az-lb-lab-outbound `
+  -o json
+
+
+### VM lifecycle
+
+az vm restart `
+  -g az-lb-lab-rg `
+  -n az-lb-lab-vm1
+
+
+az vm restart `
+  -g az-lb-lab-rg `
+  -n az-lb-lab-vm2
+
+
+az vm deallocate `
+  -g az-lb-lab-rg `
+  -n az-lb-lab-vm1
+
+
+az vm deallocate `
+  -g az-lb-lab-rg `
+  -n az-lb-lab-vm2
+
+
+az vm start `
+  -g az-lb-lab-rg `
+  -n az-lb-lab-vm1
+
+
+az vm start `
+  -g az-lb-lab-rg `
+  -n az-lb-lab-vm2
+
+
+============================================================
+28. FINAL LESSONS FROM THE SESSION
+============================================================
+
+1. Build the traffic path first.
+
+   Public IP
+      ↓
+   Load Balancer
+      ↓
+   Frontend rule
+      ↓
+   Backend pool
+      ↓
+   Health probe
+      ↓
+   NSG
+      ↓
+   VM
+      ↓
+   Nginx
+
+
+2. A running VM does not automatically mean the backend is healthy.
+
+   The health probe determines backend eligibility.
+
+
+3. A VM can remain in the backend pool while being unhealthy.
+
+
+4. NSGs still control access to the backend.
+
+
+5. Removing a VM public IP does not necessarily remove outbound
+   connectivity.
+
+
+6. Load Balancer outbound connectivity involves SNAT.
+
+
+7. The outbound rule initially conflicted with the existing
+   load-balancing rule because both referenced the same frontend
+   configuration for outbound SNAT.
+
+   The existing rule therefore had outbound SNAT disabled before
+   creating the explicit outbound rule.
+
+
+8. Setting:
+
+   defaultOutboundAccess: false
+
+   is a control-plane configuration change.
+
+   Actual connectivity must still be tested from the VM.
+
+
+9. The lab demonstrated that existing VM/network state can affect
+   when a networking change becomes observable in the data plane.
+
+   Therefore, after changing networking configuration:
+
+   - inspect the resource configuration
+   - inspect the VM state
+   - test actual connectivity
+   - perform an appropriate VM lifecycle transition if required
+   - test again
+
+
+10. Never assume that a successful Azure CLI configuration command
+    means the data plane is already behaving as expected.
+
+
+============================================================
+29. LAB STATUS
+============================================================
+
 Azure Standard Load Balancer Lab
+
 Status: COMPLETE
 
-✓ Resource group
-✓ VNet
-✓ Two subnets
-✓ Two backend VMs
-✓ Nginx
-✓ Backend pool
-✓ Standard Static Public IP
-✓ Standard Load Balancer
-✓ HTTP health probe
-✓ Load-balancing rule
-✓ NSG configuration
-✓ Traffic distribution test
-✓ Backend failure test
-✓ Backend recovery test
-```
 
-## Key Takeaway
+Completed:
 
-The most important lesson from this lab:
+[✓] Resource group
+[✓] VNet
+[✓] Two subnets
+[✓] Two Ubuntu VMs
+[✓] Nginx installation
+[✓] Private VM-to-VM connectivity
+[✓] NIC-level NSGs
+[✓] HTTP NSG rules
+[✓] Standard Static Public IP
+[✓] Standard Public Load Balancer
+[✓] Frontend configuration
+[✓] Backend address pool
+[✓] HTTP health probe
+[✓] TCP load-balancing rule
+[✓] Public traffic test
+[✓] Backend failure test
+[✓] Backend recovery test
+[✓] VM public IP removal
+[✓] Outbound connectivity investigation
+[✓] SNAT investigation
+[✓] Load Balancer outbound rule
+[✓] Default outbound access disabled
+[✓] VM lifecycle troubleshooting
+[✓] Final outbound connectivity verification
 
-> **Azure Load Balancer distributes traffic only among healthy backends. Health probes determine backend eligibility, while NSGs determine whether the required network traffic is permitted.**
+
+============================================================
+30. FINAL STATE
+============================================================
+
+Inbound:
+
+Internet
+   ↓
+20.207.206.109:80
+   ↓
+Azure Load Balancer
+   ↓
+Healthy backend
+   ↓
+VM1 / VM2
+
+
+Outbound:
+
+VM1 ──X──> Internet
+VM2 ──X──> Internet
+
+
+VM public IPs:
+
+VM1 → none
+VM2 → none
+
+
+Private IPs:
+
+VM1 → 10.10.1.4
+VM2 → 10.10.2.4
+
+
+Backend pool:
+
+vm1 → 10.10.1.4
+vm2 → 10.10.2.4
+
+
+Subnet default outbound access:
+
+subnet1 → false
+subnet2 → false
+
+
+Load Balancer:
+
+az-lb-lab-lb
+Standard SKU
+20.207.206.109 frontend
+HTTP health probe
+TCP :80 load-balancing rule
+Outbound rule configured during the experiment
