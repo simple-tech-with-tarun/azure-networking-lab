@@ -1,6 +1,3 @@
-Absolutely. Here is the **full `README.md`**, incorporating the Load Balancer build, troubleshooting journey, health-based failover, outbound/SNAT experiment, and the final state we actually reached.
-
-```markdown
 # Azure Load Balancer Lab
 
 A hands-on Azure networking lab demonstrating how to build and troubleshoot a **Standard Public Azure Load Balancer** using the Azure CLI.
@@ -16,32 +13,32 @@ The lab also explores **outbound connectivity**, including Load Balancer outboun
 ## Load Balancer Traffic
 
 ```text
-                         Internet
-                            |
-                            |
-                   Public IP: 20.207.206.109
-                            |
-                            v
-                +-----------------------+
-                |   Azure Load Balancer |
-                |     Standard SKU      |
-                +-----------------------+
-                            |
-                     Frontend: TCP/80
-                            |
-                            v
-                +-----------------------+
-                |    Backend Pool       |
-                |                       |
-                |  VM1        VM2       |
-                | 10.10.1.4  10.10.2.4 |
-                +-----------------------+
-                    |             |
-                    |             |
-              NGINX :80     NGINX :80
-                    |             |
-             "Hello from     "Hello from
-                VM1"             VM2"
+                        Internet
+                           |
+                           |
+                  Public IP: 20.207.206.109
+                           |
+                           v
+               +-----------------------+
+               |   Azure Load Balancer |
+               |     Standard SKU      |
+               +-----------------------+
+                           |
+                    Frontend: TCP/80
+                           |
+                           v
+               +-----------------------+
+               |    Backend Pool       |
+               |                       |
+               |  VM1        VM2       |
+               | 10.10.1.4  10.10.2.4 |
+               +-----------------------+
+                   |             |
+                   |             |
+             NGINX :80     NGINX :80
+                   |             |
+            "Hello from     "Hello from
+               VM1"             VM2"
 ```
 
 ## Outbound Connectivity
@@ -52,22 +49,28 @@ Final state:
 
 ```text
 VM1: 10.10.1.4
-   |
-   X
-   |
+  |
+  | No VM Public IP
+  | defaultOutboundAccess = false
+  | LB outbound rule exists
+  | Final outbound connectivity test failed
+  |
+  X
+  |
 Internet
 
 
 VM2: 10.10.2.4
-   |
-   X
-   |
+  |
+  | No VM Public IP
+  | defaultOutboundAccess = false
+  | LB outbound rule exists
+  | Final outbound connectivity test failed
+  |
+  X
+  |
 Internet
 ```
-
-Both VMs have private IP addresses only, with no public IP attached to their NICs.
-
-Default outbound access was disabled on both subnets.
 
 ---
 
@@ -89,6 +92,22 @@ Default outbound access was disabled on both subnets.
 | Backend Port | `80` |
 | Probe | HTTP `/` |
 | Frontend Port | `80` |
+
+## Final Load Balancer Configuration
+
+```text
+Load Balancer
+- Name: az-lb-lab-lb
+- SKU: Standard
+- Frontend: 20.207.206.109
+- Frontend port: 80
+- Backend port: 80
+- Backend pool: az-lb-lab-lbbepool
+- Health probe: HTTP :80 /
+- Load-balancing rule: az-lb-lab-http-rule
+- Outbound rule: az-lb-lab-outbound
+- disableOutboundSnat: true
+```
 
 ---
 
@@ -112,7 +131,7 @@ This lab demonstrates:
   - Backend port
   - Health probe
   - NSGs
-- Verifying load balancing behaviour.
+- Verifying load-balancing behaviour.
 - Simulating backend failure by stopping NGINX.
 - Understanding that an unhealthy backend is removed from load-balancing consideration.
 - Understanding outbound connectivity from Azure VMs.
@@ -249,7 +268,7 @@ az network nic list `
 
 # 4. Install NGINX
 
-NGINX was installed on both VMs using VM Run Command.
+NGINX was installed on both VMs using Azure VM Run Command.
 
 ## VM1
 
@@ -275,7 +294,25 @@ The installation succeeded on both machines.
 
 ---
 
-# 5. Verify Backend Connectivity
+# 5. Management Access
+
+VM configuration and troubleshooting were primarily performed through Azure CLI VM Run Command.
+
+Example:
+
+```powershell
+az vm run-command invoke `
+  -g az-lb-lab-rg `
+  -n az-lb-lab-vm1 `
+  --command-id RunShellScript `
+  --scripts "sudo systemctl status nginx --no-pager"
+```
+
+This allowed commands to be executed inside the VMs through Azure without requiring direct inbound SSH access to the backend VMs.
+
+---
+
+# 6. Verify Backend Connectivity
 
 Before introducing the Load Balancer, backend connectivity was tested directly.
 
@@ -306,7 +343,7 @@ This confirmed that:
 
 ---
 
-# 6. NSG Configuration
+# 7. NSG Configuration
 
 Each VM had its own NIC-level NSG.
 
@@ -363,7 +400,7 @@ Traffic still has to satisfy the applicable network security rules.
 
 ---
 
-# 7. Create the Public IP
+# 8. Create the Public IP
 
 Created a Standard static public IP:
 
@@ -395,7 +432,7 @@ az network public-ip show `
 
 ---
 
-# 8. Create the Load Balancer
+# 9. Create the Load Balancer
 
 Created a Standard Public Load Balancer:
 
@@ -418,7 +455,7 @@ az-lb-lab-lbbepool
 
 ---
 
-# 9. Add Backend Servers
+# 10. Add Backend Servers
 
 Added VM1:
 
@@ -466,7 +503,7 @@ vm2     10.10.2.4
 
 ---
 
-# 10. Create the Health Probe
+# 11. Create the Health Probe
 
 Created an HTTP health probe:
 
@@ -499,7 +536,7 @@ The backend must successfully respond for the Load Balancer to consider it healt
 
 ---
 
-# 11. Create the Load-Balancing Rule
+# 12. Create the Load-Balancing Rule
 
 Created the frontend-to-backend rule:
 
@@ -538,7 +575,7 @@ The health probe determines which backend instances are eligible to receive traf
 
 ---
 
-# 12. Initial Troubleshooting
+# 13. Initial Troubleshooting
 
 The first attempt to access the public IP failed:
 
@@ -579,7 +616,7 @@ az vm run-command invoke `
   --scripts "sudo ss -lntp | grep ':80 '"
 ```
 
-Result confirmed that NGINX was listening on port 80.
+Result confirmed that NGINX was listening on port 80:
 
 ```text
 LISTEN ... 0.0.0.0:80 ...
@@ -590,7 +627,7 @@ After the NSG correction, the Load Balancer began distributing requests successf
 
 ---
 
-# 13. Verify Load Balancing
+# 14. Verify Load Balancing
 
 Requests were sent repeatedly to the public IP:
 
@@ -616,7 +653,7 @@ This demonstrated that the Load Balancer was successfully distributing traffic b
 
 ---
 
-# 14. Test Health-Based Failover
+# 15. Test Health-Based Failover
 
 To simulate a backend failure, NGINX was stopped on VM1:
 
@@ -634,7 +671,7 @@ The important distinction is:
 
 ```text
 Backend pool membership
-        ≠
+       ≠
 Healthy backend
 ```
 
@@ -653,7 +690,7 @@ VM1 was effectively removed from load-balancing consideration because it was unh
 
 ---
 
-# 15. Restore VM1
+# 16. Restore VM1
 
 NGINX was restarted:
 
@@ -685,7 +722,7 @@ After the health probe detected the recovered backend, VM1 became eligible for l
 
 ---
 
-# 16. Explore Outbound Connectivity
+# 17. Explore Outbound Connectivity
 
 After completing the inbound Load Balancer configuration, the lab was extended to investigate how backend VMs obtain outbound Internet connectivity.
 
@@ -693,25 +730,25 @@ This introduced several different concepts:
 
 ```text
 VM Public IP
-       |
-       +---- Direct public connectivity
+      |
+      +---- Direct public connectivity
 
 
 Load Balancer outbound rule
-       |
-       +---- Outbound SNAT through LB frontend
+      |
+      +---- Outbound SNAT through LB frontend
 
 
 Default outbound access
-       |
-       +---- Azure-provided outbound connectivity
+      |
+      +---- Azure-provided outbound connectivity
 ```
 
 These mechanisms are separate and should not be treated as the same thing.
 
 ---
 
-# 17. Remove VM Public IPs
+# 18. Remove VM Public IPs
 
 The original VM deployments had public IPs attached to their NICs.
 
@@ -779,7 +816,7 @@ The VMs no longer had directly associated public IPs.
 
 ---
 
-# 18. Create a Load Balancer Outbound Rule
+# 19. Create a Load Balancer Outbound Rule
 
 The Load Balancer was then configured with an outbound rule:
 
@@ -807,7 +844,7 @@ The same frontend IP configuration was being used by:
 
 ```text
 Inbound Load-Balancing Rule
-        +
+       +
 Outbound Rule
 ```
 
@@ -815,7 +852,7 @@ The existing load-balancing rule therefore needed outbound SNAT disabled.
 
 ---
 
-# 19. Disable Outbound SNAT on the Load-Balancing Rule
+# 20. Disable Outbound SNAT on the Load-Balancing Rule
 
 Updated the existing rule:
 
@@ -850,7 +887,7 @@ The outbound rule could then be created successfully.
 
 ---
 
-# 20. Verify Load Balancer Outbound Rule
+# 21. Verify Load Balancer Outbound Rule
 
 The outbound rule was configured as:
 
@@ -884,7 +921,7 @@ az-lb-lab-outbound  All         15             1024
 
 ---
 
-# 21. Unexpected Outbound Behaviour
+# 22. Unexpected Outbound Behaviour
 
 The VMs were tested:
 
@@ -919,7 +956,7 @@ This was an important troubleshooting discovery:
 
 ```text
 No public IP on the VM NIC
-        ≠
+       ≠
 No outbound Internet connectivity
 ```
 
@@ -927,7 +964,7 @@ Removing the VM public IPs alone was not sufficient to guarantee that outbound I
 
 ---
 
-# 22. Investigate Effective Routes
+# 23. Investigate Effective Routes
 
 The effective route table was inspected:
 
@@ -956,7 +993,7 @@ The default route helped explain why the VM could still reach external destinati
 
 ---
 
-# 23. Disable Default Outbound Access
+# 24. Disable Default Outbound Access
 
 To prevent Azure's default outbound connectivity mechanism from providing Internet access, `defaultOutboundAccess` was disabled on both subnets.
 
@@ -1024,9 +1061,9 @@ Both returned:
 
 ---
 
-# 24. VM Deallocation and Networking Behaviour
+# 25. VM Restart and Networking Behaviour
 
-After changing the subnet outbound configuration, the VMs were deallocated/restarted to ensure the updated networking state was fully reflected.
+During the experiment, the VMs were restarted/deallocated and started again to ensure the updated networking state was reflected.
 
 The VMs were restarted:
 
@@ -1042,7 +1079,7 @@ az vm restart `
   -n az-lb-lab-vm2
 ```
 
-The VMs were also explicitly started after a deallocated state during troubleshooting:
+The VMs were also explicitly started after being deallocated during troubleshooting:
 
 ```powershell
 az vm start `
@@ -1058,15 +1095,15 @@ az vm start `
 
 ### Important lesson
 
-This lab demonstrated that changes to Azure networking configuration do not necessarily behave exactly as expected immediately inside an already-running VM.
-
-For this experiment, deallocation/restart was required before the intended outbound connectivity behaviour was observed.
+During this lab, the updated outbound behaviour was not observed until the VMs had been restarted/deallocated and started again.
 
 This should not be interpreted as a universal rule that every Azure networking change requires VM deallocation.
 
+The deallocation/restart cycle was part of this specific experiment and troubleshooting process.
+
 ---
 
-# 25. Final Outbound Connectivity Test
+# 26. Final Outbound Connectivity Test
 
 After the networking changes and VM restart/deallocation cycle, outbound connectivity was tested again.
 
@@ -1080,11 +1117,7 @@ az vm run-command invoke `
   --scripts "curl -4 -s --max-time 10 https://api.ipify.org; echo"
 ```
 
-Result:
-
-```text
-No public IP returned
-```
+The request did not return a public IP and outbound Internet connectivity was no longer functional.
 
 ## VM2
 
@@ -1096,25 +1129,37 @@ az vm run-command invoke `
   --scripts "curl -4 -s --max-time 10 https://api.ipify.org; echo"
 ```
 
-Result:
+The request did not return a public IP and outbound Internet connectivity was no longer functional.
 
-```text
-No public IP returned
-```
-
-The command completed successfully, but no external IP was returned.
-
-This confirmed that the VMs no longer had working outbound Internet connectivity.
+This confirmed that the final VM configuration no longer provided working outbound Internet connectivity.
 
 ---
 
 # Key Lessons
 
-## 1. A Load Balancer is not a proxy
+## 1. A Load Balancer is not an application-layer reverse proxy
 
-The Load Balancer does not simply forward traffic blindly.
+Azure Load Balancer operates primarily at Layer 4.
 
-It maintains knowledge of backend health and sends traffic only to eligible backend instances.
+It distributes network connections rather than performing application-layer HTTP routing.
+
+```text
+Azure Load Balancer
+→ Layer 4
+→ TCP/UDP
+→ Connection distribution
+→ Health-based backend selection
+```
+
+This differs from an application-layer service such as Azure Application Gateway:
+
+```text
+Application Gateway
+→ Layer 7
+→ HTTP/HTTPS
+→ URL/host/header-based routing
+→ WAF capabilities
+```
 
 ---
 
@@ -1165,23 +1210,23 @@ This means an application-level failure can affect traffic distribution even whe
 
 The Load Balancer does not override NSG security.
 
-The traffic path must satisfy network security rules.
+The traffic path must satisfy the applicable network security rules.
 
 In this lab:
 
 ```text
 Internet
-   |
-   v
+  |
+  v
 Load Balancer
-   |
-   v
+  |
+  v
 VM NIC
-   |
-   v
+  |
+  v
 NSG
-   |
-   v
+  |
+  v
 NGINX :80
 ```
 
@@ -1195,21 +1240,21 @@ When the public IP initially failed, the investigation followed the traffic path
 
 ```text
 Public IP
-    ↓
+   ↓
 Load Balancer
-    ↓
+   ↓
 Frontend configuration
-    ↓
+   ↓
 Load-balancing rule
-    ↓
+   ↓
 Backend pool
-    ↓
+   ↓
 Health probe
-    ↓
+   ↓
 NIC / NSG
-    ↓
+   ↓
 VM
-    ↓
+   ↓
 NGINX :80
 ```
 
@@ -1237,11 +1282,11 @@ Inbound:
 
 ```text
 Internet
-   |
-   v
+  |
+  v
 LB Frontend
-   |
-   v
+  |
+  v
 Backend VM
 ```
 
@@ -1249,14 +1294,14 @@ Outbound:
 
 ```text
 Backend VM
-   |
-   v
+  |
+  v
 LB outbound SNAT
-   |
-   v
+  |
+  v
 LB Frontend Public IP
-   |
-   v
+  |
+  v
 Internet
 ```
 
@@ -1286,7 +1331,7 @@ One of the most important lessons from this experiment was:
 
 ```text
 NIC Public IP = None
-        ≠
+       ≠
 VM has no Internet access
 ```
 
@@ -1311,9 +1356,9 @@ The lab demonstrated that these should not be treated as interchangeable:
 
 ```text
 Default outbound access
-        ≠
+       ≠
 Load Balancer outbound SNAT
-        ≠
+       ≠
 VM Public IP
 ```
 
@@ -1361,7 +1406,7 @@ Deallocation does not mean the VM was deleted and recreated.
 
 The VM resource, disks, configuration, private networking configuration, and operating-system data remain associated with the VM.
 
-For this lab, deallocation/restart was used to make the networking configuration change take effect as observed.
+For this lab, deallocation/restart was used as part of the troubleshooting process to observe the intended outbound networking behaviour.
 
 ---
 
@@ -1418,14 +1463,31 @@ Resource Group
             └── az-lb-lab-outbound
 ```
 
-Final outbound state:
+## Final inbound state
+
+```text
+Internet
+    |
+    v
+20.207.206.109:80
+    |
+    v
+Azure Standard Load Balancer
+    |
+    +----> VM1: 10.10.1.4:80
+    |
+    +----> VM2: 10.10.2.4:80
+```
+
+## Final outbound state
 
 ```text
 VM1 10.10.1.4
  |
  | No VM Public IP
- | No default outbound access
- | No working LB outbound path
+ | defaultOutboundAccess = false
+ | LB outbound rule exists
+ | Final outbound connectivity test failed
  |
  X
  |
@@ -1435,8 +1497,9 @@ Internet
 VM2 10.10.2.4
  |
  | No VM Public IP
- | No default outbound access
- | No working LB outbound path
+ | defaultOutboundAccess = false
+ | LB outbound rule exists
+ | Final outbound connectivity test failed
  |
  X
  |
@@ -1508,7 +1571,7 @@ By completing this lab, the following Azure networking concepts were covered:
 - `defaultOutboundAccess`
 - VM public IP removal
 - Effective route inspection
-- VM deallocation/restart behaviour
+- VM restart/deallocation behaviour
 - Outbound Internet troubleshooting
 - Layered Azure network troubleshooting
 
@@ -1522,21 +1585,21 @@ For inbound traffic:
 
 ```text
 Internet
-   ↓
+  ↓
 Public IP
-   ↓
+  ↓
 Load Balancer Frontend
-   ↓
+  ↓
 Load-Balancing Rule
-   ↓
+  ↓
 Backend Pool
-   ↓
+  ↓
 Health Probe
-   ↓
+  ↓
 NIC / NSG
-   ↓
+  ↓
 VM
-   ↓
+  ↓
 Application
 ```
 
@@ -1544,13 +1607,13 @@ For outbound traffic:
 
 ```text
 VM
-   ↓
+  ↓
 NIC
-   ↓
+  ↓
 Subnet
-   ↓
+  ↓
 Outbound mechanism
-   ↓
+  ↓
 Internet
 ```
 
@@ -1562,15 +1625,14 @@ The final configuration deliberately separates:
 
 ```text
 Public Load Balancer
-        ↓
+       ↓
 Inbound application traffic
 
 from
 
 VM outbound connectivity
-        ↓
+       ↓
 Explicitly disabled
 ```
 
 This provides a clearer foundation for building more advanced Azure networking architectures.
-```
